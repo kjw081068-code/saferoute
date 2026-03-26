@@ -1,0 +1,354 @@
+.app {
+  height: 100vh;
+  width: 100vw;
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  background: #070b14;
+  color: #e8eefc;
+}
+
+.sidebar {
+  height: 100%;
+  background: linear-gradient(180deg, #0a1226 0%, #070b14 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logoMark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: radial-gradient(circle at 30% 30%, #4cc9ff 0%, #2a58ff 40%, #121a35 100%);
+  box-shadow: 0 10px 30px rgba(44, 106, 255, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.appName {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.appTagline {
+  margin-top: 3px;
+  color: rgba(232, 238, 252, 0.72);
+  font-size: 12px;
+}
+
+.form {
+  display: grid;
+  gap: 10px;
+}
+
+.label {
+  font-size: 12px;
+  color: rgba(232, 238, 252, 0.7);
+  margin-top: 2px;
+}
+
+.input {
+  height: 40px;
+  border-radius: 12px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8eefc;
+  outline: none;
+}
+
+.input::placeholder {
+  color: rgba(232, 238, 252, 0.45);
+}
+
+.input:focus {
+  border-color: rgba(76, 201, 255, 0.55);
+  box-shadow: 0 0 0 4px rgba(76, 201, 255, 0.12);
+}
+
+.primaryButton {
+  margin-top: 6px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(76, 201, 255, 0.95) 0%, rgba(42, 88, 255, 0.95) 100%);
+  color: #061025;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: 0 14px 34px rgba(42, 88, 255, 0.22);
+}
+
+.primaryButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sectionTitle {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 14px;
+}
+
+.badgeMuted {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: rgba(232, 238, 252, 0.75);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.emptyState {
+  flex: 1;
+  min-height: 140px;
+  border-radius: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(232, 238, 252, 0.72);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 16px;
+  line-height: 1.4;
+}
+
+.routeCompare {
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.routeCard {
+  border-radius: 16px;
+  padding: 12px 12px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.routeCardSafe {
+  border-color: rgba(80, 220, 140, 0.25);
+  background: linear-gradient(180deg, rgba(80, 220, 140, 0.1) 0%, rgba(255, 255, 255, 0.04) 100%);
+}
+
+.routeCardNormal {
+  border-color: rgba(255, 197, 72, 0.22);
+  background: linear-gradient(180deg, rgba(255, 197, 72, 0.08) 0%, rgba(255, 255, 255, 0.04) 100%);
+}
+
+.routeTopRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.routeTitle {
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  font-size: 13px;
+}
+
+.routeMeta {
+  color: rgba(232, 238, 252, 0.7);
+  font-size: 12px;
+}
+
+.routeSummary {
+  margin-top: 6px;
+  color: rgba(232, 238, 252, 0.78);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.routeNotes {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: rgba(232, 238, 252, 0.72);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.scoreSection {
+  display: grid;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.scoreValue {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.scoreNumber {
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+}
+
+.scoreUnit {
+  color: rgba(232, 238, 252, 0.65);
+  font-size: 12px;
+}
+
+.scoreBar {
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.scoreFill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 250ms ease;
+}
+
+.scoreFill_danger {
+  background: linear-gradient(90deg, #ff4d5e 0%, #ff7a45 100%);
+}
+
+.scoreFill_caution {
+  background: linear-gradient(90deg, #ffb020 0%, #ffe66d 100%);
+}
+
+.scoreFill_safe {
+  background: linear-gradient(90deg, #39d98a 0%, #5cffc7 100%);
+}
+
+.score_danger {
+  color: #ff6b73;
+}
+
+.score_caution {
+  color: #ffd166;
+}
+
+.score_safe {
+  color: #62f6b2;
+}
+
+.scoreLegend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: rgba(232, 238, 252, 0.6);
+}
+
+.legendDanger {
+  color: rgba(255, 107, 115, 0.9);
+}
+
+.legendCaution {
+  color: rgba(255, 209, 102, 0.9);
+}
+
+.legendSafe {
+  color: rgba(98, 246, 178, 0.9);
+}
+
+.mapArea {
+  position: relative;
+  height: 100%;
+  background: #050814;
+}
+
+.topRightClock {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 18, 38, 0.78);
+  backdrop-filter: blur(10px);
+}
+
+.clockIcon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.clockText {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  font-size: 13px;
+}
+
+.mapPlaceholder {
+  height: 100%;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.04) 40%, rgba(255, 255, 255, 0.02) 100%);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+
+.mapImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.9;
+  filter: saturate(0.92) contrast(1.06);
+  transform: scale(1.03);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.mapPlaceholderTitle {
+  position: relative;
+  z-index: 1;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+  text-align: center;
+}
+
+.mapPlaceholderSubtitle {
+  position: relative;
+  z-index: 1;
+  margin-top: 8px;
+  color: rgba(232, 238, 252, 0.72);
+  font-size: 13px;
+  text-align: center;
+}
+
