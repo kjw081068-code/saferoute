@@ -1,26 +1,67 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './App.module.css';
-import mockMap from './assets/mock-map.svg';
 
-type SafetyLevel = 'danger' | 'caution' | 'safe';
+const SILLIM_STATION = { lat: 37.4846, lng: 126.9294 };
+const MAP_ZOOM_LEVEL = 4;
+/** `panBy` 한 번에 이동할 픽셀 (동네 줌 기준) */
+const MAP_PAN_STEP_PX = 120;
 
-type RouteResult = {
-  id: 'safe' | 'normal';
-  title: string;
-  summary: string;
-  distanceKm: number;
-  durationMin: number;
-  notes: string[];
-};
+const PIN_W = 30;
+const PIN_H = 42;
 
-function clampScore(score: number) {
-  return Math.max(0, Math.min(100, Math.round(score)));
+function pinSvgDataUrl(fill: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PIN_W}" height="${PIN_H}" viewBox="0 0 30 42"><path fill="${fill}" stroke="rgba(0,0,0,0.22)" stroke-width="1" d="M15 2C8.4 2 3 7.2 3 13.5 3 19.5 15 40 15 40s12-20.5 12-26.5C27 7.2 21.6 2 15 2z"/><circle cx="15" cy="14" r="3.5" fill="#fff"/></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function scoreToLevel(score: number): SafetyLevel {
-  if (score <= 39) return 'danger';
-  if (score <= 69) return 'caution';
-  return 'safe';
+type RouteId = 'safe' | 'normal';
+
+type MapPickTarget = 'origin' | 'destination';
+
+type RouteMock = {
+  id: RouteId;
+  title: string;
+  score: number;
+  gradeLabel: string;
+  durationMin: number;
+  riskNote: string;
+};
+
+/** 출발/도착: 장소명(건물·역·가게 등) 우선, 주소는 하단 칸 */
+type LocationField = {
+  placeName: string;
+  address: string;
+};
+
+const emptyLocation = (): LocationField => ({ placeName: '', address: '' });
+
+function hasLocationValue(loc: LocationField): boolean {
+  return Boolean(loc.placeName.trim() || loc.address.trim());
+}
+
+/** coord2Address 결과 → 장소명(가능 시) + 전체 주소 */
+function locationFromGeocodeResult(r: Coord2AddressResult): LocationField {
+  const address = pickAddressFromGeocodeResult(r);
+  const bn = r.road_address?.building_name?.trim();
+  return {
+    placeName: bn ?? '',
+    address,
+  };
+}
+
+/** 지도 오버레이·요약용 한 줄 표시 */
+function formatLocationLabel(loc: LocationField): string {
+  const p = loc.placeName.trim();
+  const a = loc.address.trim();
+  if (p && a) return `${p} · ${a}`;
+  if (p) return p;
+  return a;
+}
+
+function scoreBandClass(score: number): 'bandHigh' | 'bandMid' | 'bandLow' {
+  if (score >= 80) return 'bandHigh';
+  if (score >= 50) return 'bandMid';
+  return 'bandLow';
 }
 
 function formatKoreanTime(d: Date) {
@@ -34,150 +75,351 @@ function isNight(d: Date) {
   return h >= 19 || h < 6;
 }
 
+function pickAddressFromGeocodeResult(r: Coord2AddressResult): string {
+  const road = r.road_address?.address_name?.trim();
+  if (road) return road;
+  return r.address.address_name;
+}
+
 function App() {
-  const [origin, setOrigin] = useState('신림역 4번 출구');
-  const [destination, setDestination] = useState('서울대입구역 인근');
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<KakaoMap | null>(null);
+  const originMarkerRef = useRef<KakaoMarker | null>(null);
+  const destMarkerRef = useRef<KakaoMarker | null>(null);
+  const mapPickTargetRef = useRef<MapPickTarget | null>(null);
+
+  const [mapPickTarget, setMapPickTarget] = useState<MapPickTarget | null>(null);
+  const [origin, setOrigin] = useState<LocationField>(emptyLocation);
+  const [destination, setDestination] = useState<LocationField>(emptyLocation);
   const [now, setNow] = useState(() => new Date());
   const [hasSearched, setHasSearched] = useState(false);
+  const [selectedRouteId, setSelectedRouteId] = useState<RouteId>('safe');
+
+  mapPickTargetRef.current = mapPickTarget;
+
+  const canSearch = hasLocationValue(origin) && hasLocationValue(destination);
+
+  const routes = useMemo<RouteMock[]>(
+    () => [
+      {
+        id: 'safe',
+        title: '안전 경로',
+        score: 78,
+        gradeLabel: '안전',
+        durationMin: 18,
+        riskNote:
+          '대로 위주로 이동하며 주요 구간은 가로등이 확보되어 있습니다. 혼잡 시간대에는 유동인구가 많은 쪽으로 잠시 우회하는 것을 권장합니다.',
+      },
+      {
+        id: 'normal',
+        title: '일반 경로',
+        score: 41,
+        gradeLabel: '위험',
+        durationMin: 13,
+        riskNote: '신림로 구간은 가로등이 부족해 주의가 필요합니다.',
+      },
+    ],
+    []
+  );
+
+  const selectedRoute = routes.find((r) => r.id === selectedRouteId) ?? routes[0];
+
+  const handleFindRoute = () => {
+    if (!canSearch) return;
+    setHasSearched(true);
+    setSelectedRouteId('safe');
+  };
+
+  const clearOrigin = () => {
+    setOrigin(emptyLocation());
+    originMarkerRef.current?.setMap(null);
+    originMarkerRef.current = null;
+    setMapPickTarget((prev) => (prev === 'origin' ? null : prev));
+    setHasSearched(false);
+  };
+
+  const clearDestination = () => {
+    setDestination(emptyLocation());
+    destMarkerRef.current?.setMap(null);
+    destMarkerRef.current = null;
+    setMapPickTarget((prev) => (prev === 'destination' ? null : prev));
+    setHasSearched(false);
+  };
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(t);
   }, []);
 
-  const mock = useMemo(() => {
-    const safeScore = clampScore(82);
-    const normalScore = clampScore(55);
-    const routes: RouteResult[] = [
-      {
-        id: 'safe',
-        title: '안전 경로',
-        summary: '밝은 대로 위주, CCTV/유동인구 가정 반영',
-        distanceKm: 2.7,
-        durationMin: 36,
-        notes: ['대로·가로등 구간 우선', '사람 많은 구간 우회', '취약구간 회피(가정)'],
-      },
-      {
-        id: 'normal',
-        title: '일반 경로',
-        summary: '최단거리 위주 (골목 포함 가능)',
-        distanceKm: 2.1,
-        durationMin: 28,
-        notes: ['최단거리 중심', '골목/주택가 포함 가능(가정)'],
-      },
-    ];
+  useEffect(() => {
+    const el = mapContainerRef.current;
+    const kakao = window.kakao;
+    if (!el || !kakao?.maps) {
+      return;
+    }
 
-    return {
-      safeScore,
-      normalScore,
-      routes,
+    let cancelled = false;
+
+    kakao.maps.load(() => {
+      if (cancelled || !mapContainerRef.current) {
+        return;
+      }
+
+      const map = new kakao.maps.Map(mapContainerRef.current, {
+        center: new kakao.maps.LatLng(SILLIM_STATION.lat, SILLIM_STATION.lng),
+        level: MAP_ZOOM_LEVEL,
+      });
+      mapInstanceRef.current = map;
+
+      const geocoder = new kakao.maps.services.Geocoder();
+
+      const originImage = new kakao.maps.MarkerImage(
+        pinSvgDataUrl('#2563eb'),
+        new kakao.maps.Size(PIN_W, PIN_H),
+        { offset: new kakao.maps.Point(PIN_W / 2, PIN_H) }
+      );
+      const destImage = new kakao.maps.MarkerImage(
+        pinSvgDataUrl('#ef4444'),
+        new kakao.maps.Size(PIN_W, PIN_H),
+        { offset: new kakao.maps.Point(PIN_W / 2, PIN_H) }
+      );
+
+      const handleMapClick = (mouseEvent: KakaoMouseEvent) => {
+        const target = mapPickTargetRef.current;
+        if (!target) return;
+
+        const latlng = mouseEvent.latLng;
+        const lat = latlng.getLat();
+        const lng = latlng.getLng();
+
+        geocoder.coord2Address(lng, lat, (result, status) => {
+          if (cancelled) return;
+          if (status !== kakao.maps.services.Status.OK || !result?.length) {
+            return;
+          }
+
+          const loc = locationFromGeocodeResult(result[0]);
+
+          if (target === 'origin') {
+            setOrigin(loc);
+            originMarkerRef.current?.setMap(null);
+            const marker = new kakao.maps.Marker({
+              position: latlng,
+              map,
+              image: originImage,
+            });
+            originMarkerRef.current = marker;
+          } else {
+            setDestination(loc);
+            destMarkerRef.current?.setMap(null);
+            const marker = new kakao.maps.Marker({
+              position: latlng,
+              map,
+              image: destImage,
+            });
+            destMarkerRef.current = marker;
+          }
+
+          setMapPickTarget(null);
+        });
+      };
+
+      kakao.maps.event.addListener(map, 'click', handleMapClick);
+    });
+
+    return () => {
+      cancelled = true;
+      mapInstanceRef.current = null;
+      originMarkerRef.current = null;
+      destMarkerRef.current = null;
+      if (el) {
+        el.innerHTML = '';
+      }
     };
   }, []);
 
-  const activeScore = hasSearched ? mock.safeScore : 0;
-  const activeLevel = scoreToLevel(activeScore);
+  const panMap = (dx: number, dy: number) => {
+    mapInstanceRef.current?.panBy(dx, dy);
+  };
 
   return (
     <div className={styles.app}>
       <aside className={styles.sidebar}>
-        <div className={styles.brandRow}>
+        <header className={styles.brandBlock}>
           <div className={styles.logoMark} aria-hidden />
           <div>
-            <div className={styles.appName}>안심길</div>
-            <div className={styles.appTagline}>신림동 야간 안전 귀가 경로</div>
+            <h1 className={styles.appName}>보통의하루</h1>
+            <p className={styles.appTagline}>안심 귀갓길 내비게이터</p>
           </div>
-        </div>
+        </header>
 
         <div className={styles.form}>
-          <label className={styles.label} htmlFor="origin">
-            출발지
-          </label>
-          <input
-            id="origin"
-            className={styles.input}
-            value={origin}
-            onChange={(e) => setOrigin(e.target.value)}
-            placeholder="출발지를 입력하세요"
-          />
+          <div className={styles.fieldBlock} role="group" aria-labelledby="origin-label">
+            <div className={styles.label} id="origin-label">
+              출발지
+            </div>
+            <div className={styles.inputRow}>
+              <div
+                className={`${styles.locationColumn} ${hasLocationValue(origin) ? styles.locationColumnHasClear : ''}`}
+              >
+                {hasLocationValue(origin) && (
+                  <button
+                    type="button"
+                    className={styles.locationClear}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      clearOrigin();
+                    }}
+                    aria-label="출발지 지우기"
+                  >
+                    ×
+                  </button>
+                )}
+                <div className={styles.inputWrap}>
+                  <input
+                    id="origin-place"
+                    aria-label="출발지 장소명"
+                    className={`${styles.input} ${styles.inputPlace} ${
+                      mapPickTarget === 'origin' ? styles.inputActive : ''
+                    }`}
+                    value={origin.placeName}
+                    onChange={(e) => setOrigin((o) => ({ ...o, placeName: e.target.value }))}
+                    onClick={() => setMapPickTarget('origin')}
+                    onFocus={() => setMapPickTarget('origin')}
+                    placeholder="건물·역·가게 이름 (있는 경우)"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className={styles.addressFieldLabel}>주소</div>
+                <div className={styles.inputWrap}>
+                  <input
+                    id="origin-address"
+                    aria-label="출발지 주소"
+                    className={`${styles.input} ${styles.inputAddress} ${
+                      mapPickTarget === 'origin' ? styles.inputActive : ''
+                    }`}
+                    value={origin.address}
+                    onChange={(e) => setOrigin((o) => ({ ...o, address: e.target.value }))}
+                    onClick={() => setMapPickTarget('origin')}
+                    onFocus={() => setMapPickTarget('origin')}
+                    placeholder="주소"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <span className={styles.fieldHint}>지도를 클릭해서 설정하세요</span>
+            </div>
+          </div>
 
-          <label className={styles.label} htmlFor="destination">
-            도착지
-          </label>
-          <input
-            id="destination"
-            className={styles.input}
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-            placeholder="도착지를 입력하세요"
-          />
+          <div className={styles.fieldBlock} role="group" aria-labelledby="destination-label">
+            <div className={styles.label} id="destination-label">
+              도착지
+            </div>
+            <div className={styles.inputRow}>
+              <div
+                className={`${styles.locationColumn} ${
+                  hasLocationValue(destination) ? styles.locationColumnHasClear : ''
+                }`}
+              >
+                {hasLocationValue(destination) && (
+                  <button
+                    type="button"
+                    className={styles.locationClear}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      clearDestination();
+                    }}
+                    aria-label="도착지 지우기"
+                  >
+                    ×
+                  </button>
+                )}
+                <div className={styles.inputWrap}>
+                  <input
+                    id="destination-place"
+                    aria-label="도착지 장소명"
+                    className={`${styles.input} ${styles.inputPlace} ${
+                      mapPickTarget === 'destination' ? styles.inputActive : ''
+                    }`}
+                    value={destination.placeName}
+                    onChange={(e) => setDestination((o) => ({ ...o, placeName: e.target.value }))}
+                    onClick={() => setMapPickTarget('destination')}
+                    onFocus={() => setMapPickTarget('destination')}
+                    placeholder="건물·역·가게 이름 (있는 경우)"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className={styles.addressFieldLabel}>주소</div>
+                <div className={styles.inputWrap}>
+                  <input
+                    id="destination-address"
+                    aria-label="도착지 주소"
+                    className={`${styles.input} ${styles.inputAddress} ${
+                      mapPickTarget === 'destination' ? styles.inputActive : ''
+                    }`}
+                    value={destination.address}
+                    onChange={(e) => setDestination((o) => ({ ...o, address: e.target.value }))}
+                    onClick={() => setMapPickTarget('destination')}
+                    onFocus={() => setMapPickTarget('destination')}
+                    placeholder="주소"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <span className={styles.fieldHint}>지도를 클릭해서 설정하세요</span>
+            </div>
+          </div>
 
           <button
             type="button"
             className={styles.primaryButton}
-            onClick={() => setHasSearched(true)}
-            disabled={!origin.trim() || !destination.trim()}
+            onClick={handleFindRoute}
+            disabled={!canSearch}
           >
             안전 경로 찾기
           </button>
         </div>
 
-        <section className={styles.results}>
-          <div className={styles.sectionHeaderRow}>
-            <div className={styles.sectionTitle}>경로 결과</div>
-            <div className={styles.badgeMuted}>{hasSearched ? 'mock' : '대기'}</div>
-          </div>
-
+        <section className={styles.routeSection} aria-label="경로 비교">
           {!hasSearched ? (
             <div className={styles.emptyState}>
               출발지와 도착지를 입력한 뒤
               <br />
-              “안전 경로 찾기”를 눌러주세요.
+              「안전 경로 찾기」를 눌러주세요.
             </div>
           ) : (
-            <div className={styles.routeCompare}>
-              {mock.routes.map((r) => (
-                <div
-                  key={r.id}
-                  className={`${styles.routeCard} ${r.id === 'safe' ? styles.routeCardSafe : styles.routeCardNormal}`}
-                >
-                  <div className={styles.routeTopRow}>
-                    <div className={styles.routeTitle}>{r.title}</div>
-                    <div className={styles.routeMeta}>
-                      {r.distanceKm.toFixed(1)}km · {r.durationMin}분
-                    </div>
-                  </div>
-                  <div className={styles.routeSummary}>{r.summary}</div>
-                  <ul className={styles.routeNotes}>
-                    {r.notes.map((n) => (
-                      <li key={n}>{n}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
+            <>
+              <div className={styles.routeCards}>
+                {routes.map((r) => {
+                  const selected = r.id === selectedRouteId;
+                  const band = scoreBandClass(r.score);
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      className={`${styles.routeCard} ${selected ? styles.routeCardSelected : ''}`}
+                      onClick={() => setSelectedRouteId(r.id)}
+                      aria-pressed={selected}
+                    >
+                      <div className={styles.routeCardHeader}>
+                        <span className={styles.routeCardTitle}>{r.title}</span>
+                        <span className={`${styles.routeScore} ${styles[`score_${band}`]}`}>{r.score}점</span>
+                      </div>
+                      <div className={styles.routeCardMeta}>
+                        <span className={styles.routeGrade}>등급 {r.gradeLabel}</span>
+                        <span className={styles.routeTime}>소요 {r.durationMin}분</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className={styles.riskPanel}>
+                <div className={styles.riskPanelLabel}>선택 경로 · 위험 구간 안내</div>
+                <p className={styles.riskPanelText}>{selectedRoute.riskNote}</p>
+              </div>
+            </>
           )}
-        </section>
-
-        <section className={styles.scoreSection}>
-          <div className={styles.sectionHeaderRow}>
-            <div className={styles.sectionTitle}>안전 점수</div>
-            <div className={styles.scoreValue}>
-              <span className={`${styles.scoreNumber} ${styles[`score_${activeLevel}`]}`}>{activeScore}</span>
-              <span className={styles.scoreUnit}>/ 100</span>
-            </div>
-          </div>
-
-          <div className={styles.scoreBar} role="img" aria-label={`안전 점수 ${activeScore}점`}>
-            <div
-              className={`${styles.scoreFill} ${styles[`scoreFill_${activeLevel}`]}`}
-              style={{ width: `${activeScore}%` }}
-            />
-          </div>
-          <div className={styles.scoreLegend}>
-            <span className={styles.legendDanger}>위험</span>
-            <span className={styles.legendCaution}>보통</span>
-            <span className={styles.legendSafe}>안전</span>
-          </div>
         </section>
       </aside>
 
@@ -189,11 +431,60 @@ function App() {
           <span className={styles.clockText}>{formatKoreanTime(now)}</span>
         </div>
 
-        <div className={styles.mapPlaceholder} role="img" aria-label="지도 영역 자리 표시자">
-          <img className={styles.mapImage} src={mockMap} alt="" aria-hidden />
-          <div className={styles.mapPlaceholderTitle}>지도 영역 (추후 카카오맵)</div>
-          <div className={styles.mapPlaceholderSubtitle}>
-            {origin.trim()} → {destination.trim()}
+        <div className={styles.mapShell}>
+          <div ref={mapContainerRef} className={styles.mapCanvas} aria-label="카카오맵" />
+          <div className={styles.mapOverlay} aria-hidden>
+            <div className={styles.mapPlaceholderInner}>
+              <div className={styles.mapPlaceholderTitle}>카카오맵</div>
+              <div className={styles.mapPlaceholderSubtitle}>
+                {mapPickTarget === 'origin' && '출발지: 지도에서 위치를 선택하세요'}
+                {mapPickTarget === 'destination' && '도착지: 지도에서 위치를 선택하세요'}
+                {!mapPickTarget &&
+                  (hasLocationValue(origin) && hasLocationValue(destination)
+                    ? `${formatLocationLabel(origin)} → ${formatLocationLabel(destination)}`
+                    : '출발지 · 도착지를 입력하거나 지도에서 선택하세요')}
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.mapPanPad} role="group" aria-label="지도 이동">
+            <span className={styles.mapPanCell} aria-hidden />
+            <button
+              type="button"
+              className={styles.mapPanBtn}
+              onClick={() => panMap(0, -MAP_PAN_STEP_PX)}
+              aria-label="지도 위로 이동"
+            >
+              ↑
+            </button>
+            <span className={styles.mapPanCell} aria-hidden />
+            <button
+              type="button"
+              className={styles.mapPanBtn}
+              onClick={() => panMap(-MAP_PAN_STEP_PX, 0)}
+              aria-label="지도 왼쪽으로 이동"
+            >
+              ←
+            </button>
+            <span className={styles.mapPanCell} aria-hidden />
+            <button
+              type="button"
+              className={styles.mapPanBtn}
+              onClick={() => panMap(MAP_PAN_STEP_PX, 0)}
+              aria-label="지도 오른쪽으로 이동"
+            >
+              →
+            </button>
+            <span className={styles.mapPanCell} aria-hidden />
+            <button
+              type="button"
+              className={styles.mapPanBtn}
+              onClick={() => panMap(0, MAP_PAN_STEP_PX)}
+              aria-label="지도 아래로 이동"
+            >
+              ↓
+            </button>
+            <span className={styles.mapPanCell} aria-hidden />
           </div>
         </div>
       </main>
