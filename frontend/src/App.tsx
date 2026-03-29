@@ -81,6 +81,23 @@ function pickAddressFromGeocodeResult(r: Coord2AddressResult): string {
   return r.address.address_name;
 }
 
+const SAFETY_API_BASE = 'http://localhost:8000';
+
+type MapPointSafety = {
+  score: number;
+  grade: string;
+  lat: number;
+  lng: number;
+};
+
+/** 백엔드 grade → UI 색상 구분 */
+function safetyGradeVariant(grade: string): 'safe' | 'caution' | 'danger' {
+  const g = grade.trim().toLowerCase();
+  if (grade.includes('위험') || g === 'danger' || g === 'high_risk') return 'danger';
+  if (grade.includes('보통') || g === 'normal' || g === 'medium' || g === 'caution') return 'caution';
+  return 'safe';
+}
+
 function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<KakaoMap | null>(null);
@@ -94,8 +111,42 @@ function App() {
   const [now, setNow] = useState(() => new Date());
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState<RouteId>('safe');
+  const [mapPointSafety, setMapPointSafety] = useState<MapPointSafety | null>(null);
+  const [safetyLoading, setSafetyLoading] = useState(false);
+  const [safetyError, setSafetyError] = useState<string | null>(null);
+
+  const safetyFetchHandlerRef = useRef<(lat: number, lng: number) => void>(() => {});
 
   mapPickTargetRef.current = mapPickTarget;
+
+  safetyFetchHandlerRef.current = (lat: number, lng: number) => {
+    void (async () => {
+      setSafetyLoading(true);
+      setSafetyError(null);
+      try {
+        const params = new URLSearchParams({
+          lat: String(lat),
+          lng: String(lng),
+        });
+        const res = await fetch(`${SAFETY_API_BASE}/api/safety-score?${params}`);
+        if (!res.ok) {
+          throw new Error(`서버 응답 ${res.status}`);
+        }
+        const data = (await res.json()) as { score?: unknown; grade?: unknown };
+        const score = Number(data.score);
+        const grade = typeof data.grade === 'string' ? data.grade.trim() : '';
+        if (!Number.isFinite(score) || !grade) {
+          throw new Error('응답 형식이 올바르지 않습니다.');
+        }
+        setMapPointSafety({ score, grade, lat, lng });
+      } catch (e) {
+        setMapPointSafety(null);
+        setSafetyError(e instanceof Error ? e.message : '안전 점수를 불러오지 못했습니다.');
+      } finally {
+        setSafetyLoading(false);
+      }
+    })();
+  };
 
   const canSearch = hasLocationValue(origin) && hasLocationValue(destination);
 
@@ -185,12 +236,14 @@ function App() {
       );
 
       const handleMapClick = (mouseEvent: KakaoMouseEvent) => {
-        const target = mapPickTargetRef.current;
-        if (!target) return;
-
         const latlng = mouseEvent.latLng;
         const lat = latlng.getLat();
         const lng = latlng.getLng();
+
+        safetyFetchHandlerRef.current(lat, lng);
+
+        const target = mapPickTargetRef.current;
+        if (!target) return;
 
         geocoder.coord2Address(lng, lat, (result, status) => {
           if (cancelled) return;
@@ -379,6 +432,42 @@ function App() {
             안전 경로 찾기
           </button>
         </div>
+
+        <section className={styles.safetyPanel} aria-live="polite" aria-label="지도 클릭 지점 안전도">
+          <div className={styles.safetyPanelTitle}>지도 클릭 지점 안전도</div>
+          {safetyLoading && <div className={styles.safetyPanelMuted}>불러오는 중…</div>}
+          {!safetyLoading && safetyError && <div className={styles.safetyPanelError}>{safetyError}</div>}
+          {!safetyLoading && !safetyError && mapPointSafety && (
+            <div className={styles.safetyPanelBody}>
+              <div className={styles.safetyScoreRow}>
+                <span className={styles.safetyScoreLabel}>점수</span>
+                <span
+                  className={`${styles.safetyScoreValue} ${
+                    styles[`safetyGrade_${safetyGradeVariant(mapPointSafety.grade)}`]
+                  }`}
+                >
+                  {mapPointSafety.score}점
+                </span>
+              </div>
+              <div className={styles.safetyGradeRow}>
+                <span className={styles.safetyGradeLabel}>등급</span>
+                <span
+                  className={`${styles.safetyGradeBadge} ${
+                    styles[`safetyGrade_${safetyGradeVariant(mapPointSafety.grade)}`]
+                  }`}
+                >
+                  {mapPointSafety.grade}
+                </span>
+              </div>
+              <div className={styles.safetyCoords}>
+                {mapPointSafety.lat.toFixed(5)}, {mapPointSafety.lng.toFixed(5)}
+              </div>
+            </div>
+          )}
+          {!safetyLoading && !safetyError && !mapPointSafety && (
+            <div className={styles.safetyPanelMuted}>지도를 클릭하면 이 위치의 안전 점수를 불러옵니다.</div>
+          )}
+        </section>
 
         <section className={styles.routeSection} aria-label="경로 비교">
           {!hasSearched ? (
