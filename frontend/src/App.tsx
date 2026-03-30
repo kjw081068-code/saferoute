@@ -98,6 +98,42 @@ function safetyGradeVariant(grade: string): 'safe' | 'caution' | 'danger' {
   return 'safe';
 }
 
+const KAKAO_SDK_SCRIPT_ID = 'kakao-maps-sdk';
+let kakaoSdkLoadPromise: Promise<void> | null = null;
+
+function loadKakaoSdk(): Promise<void> {
+  if (window.kakao?.maps) {
+    return Promise.resolve();
+  }
+  if (kakaoSdkLoadPromise) return kakaoSdkLoadPromise;
+
+  kakaoSdkLoadPromise = new Promise<void>((resolve, reject) => {
+    const key = process.env.REACT_APP_KAKAO_MAP_KEY;
+    if (!key) {
+      reject(new Error('REACT_APP_KAKAO_MAP_KEY 환경변수가 설정되지 않았습니다.'));
+      return;
+    }
+
+    const existing = document.getElementById(KAKAO_SDK_SCRIPT_ID) as HTMLScriptElement | null;
+    if (existing && existing.src.includes('YOUR_KAKAO_KEY')) {
+      existing.parentElement?.removeChild(existing);
+    }
+
+    const s = document.createElement('script');
+    s.id = KAKAO_SDK_SCRIPT_ID;
+    s.type = 'text/javascript';
+    s.async = true;
+    s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(
+      key
+    )}&autoload=false&libraries=services`;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('카카오맵 SDK 로드에 실패했습니다.'));
+    document.head.appendChild(s);
+  });
+
+  return kakaoSdkLoadPromise;
+}
+
 function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<KakaoMap | null>(null);
@@ -204,81 +240,92 @@ function App() {
 
   useEffect(() => {
     const el = mapContainerRef.current;
-    const kakao = window.kakao;
-    if (!el || !kakao?.maps) {
-      return;
-    }
+    if (!el) return;
 
     let cancelled = false;
 
-    kakao.maps.load(() => {
-      if (cancelled || !mapContainerRef.current) {
+    void (async () => {
+      try {
+        await loadKakaoSdk();
+      } catch (e) {
+        if (!cancelled) {
+          setSafetyError(e instanceof Error ? e.message : '카카오맵 SDK 로드에 실패했습니다.');
+        }
         return;
       }
 
-      const map = new kakao.maps.Map(mapContainerRef.current, {
-        center: new kakao.maps.LatLng(SILLIM_STATION.lat, SILLIM_STATION.lng),
-        level: MAP_ZOOM_LEVEL,
-      });
-      mapInstanceRef.current = map;
+      const kakao = window.kakao;
+      if (cancelled || !kakao?.maps || !mapContainerRef.current) return;
 
-      const geocoder = new kakao.maps.services.Geocoder();
+      kakao.maps.load(() => {
+        if (cancelled || !mapContainerRef.current) {
+          return;
+        }
 
-      const originImage = new kakao.maps.MarkerImage(
-        pinSvgDataUrl('#2563eb'),
-        new kakao.maps.Size(PIN_W, PIN_H),
-        { offset: new kakao.maps.Point(PIN_W / 2, PIN_H) }
-      );
-      const destImage = new kakao.maps.MarkerImage(
-        pinSvgDataUrl('#ef4444'),
-        new kakao.maps.Size(PIN_W, PIN_H),
-        { offset: new kakao.maps.Point(PIN_W / 2, PIN_H) }
-      );
-
-      const handleMapClick = (mouseEvent: KakaoMouseEvent) => {
-        const latlng = mouseEvent.latLng;
-        const lat = latlng.getLat();
-        const lng = latlng.getLng();
-
-        safetyFetchHandlerRef.current(lat, lng);
-
-        const target = mapPickTargetRef.current;
-        if (!target) return;
-
-        geocoder.coord2Address(lng, lat, (result, status) => {
-          if (cancelled) return;
-          if (status !== kakao.maps.services.Status.OK || !result?.length) {
-            return;
-          }
-
-          const loc = locationFromGeocodeResult(result[0]);
-
-          if (target === 'origin') {
-            setOrigin(loc);
-            originMarkerRef.current?.setMap(null);
-            const marker = new kakao.maps.Marker({
-              position: latlng,
-              map,
-              image: originImage,
-            });
-            originMarkerRef.current = marker;
-          } else {
-            setDestination(loc);
-            destMarkerRef.current?.setMap(null);
-            const marker = new kakao.maps.Marker({
-              position: latlng,
-              map,
-              image: destImage,
-            });
-            destMarkerRef.current = marker;
-          }
-
-          setMapPickTarget(null);
+        const map = new kakao.maps.Map(mapContainerRef.current, {
+          center: new kakao.maps.LatLng(SILLIM_STATION.lat, SILLIM_STATION.lng),
+          level: MAP_ZOOM_LEVEL,
         });
-      };
+        mapInstanceRef.current = map;
 
-      kakao.maps.event.addListener(map, 'click', handleMapClick);
-    });
+        const geocoder = new kakao.maps.services.Geocoder();
+
+        const originImage = new kakao.maps.MarkerImage(
+          pinSvgDataUrl('#2563eb'),
+          new kakao.maps.Size(PIN_W, PIN_H),
+          { offset: new kakao.maps.Point(PIN_W / 2, PIN_H) }
+        );
+        const destImage = new kakao.maps.MarkerImage(
+          pinSvgDataUrl('#ef4444'),
+          new kakao.maps.Size(PIN_W, PIN_H),
+          { offset: new kakao.maps.Point(PIN_W / 2, PIN_H) }
+        );
+
+        const handleMapClick = (mouseEvent: KakaoMouseEvent) => {
+          const latlng = mouseEvent.latLng;
+          const lat = latlng.getLat();
+          const lng = latlng.getLng();
+
+          safetyFetchHandlerRef.current(lat, lng);
+
+          const target = mapPickTargetRef.current;
+          if (!target) return;
+
+          geocoder.coord2Address(lng, lat, (result, status) => {
+            if (cancelled) return;
+            if (status !== kakao.maps.services.Status.OK || !result?.length) {
+              return;
+            }
+
+            const loc = locationFromGeocodeResult(result[0]);
+
+            if (target === 'origin') {
+              setOrigin(loc);
+              originMarkerRef.current?.setMap(null);
+              const marker = new kakao.maps.Marker({
+                position: latlng,
+                map,
+                image: originImage,
+              });
+              originMarkerRef.current = marker;
+            } else {
+              setDestination(loc);
+              destMarkerRef.current?.setMap(null);
+              const marker = new kakao.maps.Marker({
+                position: latlng,
+                map,
+                image: destImage,
+              });
+              destMarkerRef.current = marker;
+            }
+
+            setMapPickTarget(null);
+          });
+        };
+
+        kakao.maps.event.addListener(map, 'click', handleMapClick);
+      });
+    })();
 
     return () => {
       cancelled = true;
