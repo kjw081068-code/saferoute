@@ -10,8 +10,8 @@ from routers.safety import _load_grid
 
 router = APIRouter()
 
-KAKAO_DIRECTIONS_URL = "https://apis-navi.kakaomobility.com/v1/directions"
-SAMPLE_INTERVAL_M = 200  # 샘플링 간격 (미터)
+TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
+SAMPLE_INTERVAL_M = 100  # 샘플링 간격 (미터, 격자 크기와 동일)
 
 
 # ── 요청/응답 모델 ───────────────────────────────────────────────────────────
@@ -70,6 +70,17 @@ def _extract_coords(kakao_route: dict) -> List[tuple]:
     return coords
 
 
+def _extract_tmap_coords(features: list) -> List[tuple]:
+    """TMAP GeoJSON features에서 (lat, lng) 튜플 리스트를 추출합니다."""
+    coords = []
+    for feature in features:
+        geom = feature.get("geometry", {})
+        if geom.get("type") == "LineString":
+            for lng, lat in geom.get("coordinates", []):
+                coords.append((lat, lng))
+    return coords
+
+
 def _sample_coords(coords: List[tuple], interval_m: float = SAMPLE_INTERVAL_M) -> List[tuple]:
     """누적 거리 기반으로 interval_m 간격마다 좌표를 샘플링합니다.
 
@@ -100,91 +111,90 @@ def _score_for_coord(lat: float, lng: float) -> tuple:
     return float(row["score"]), str(row["grade"])
 
 
-def _score_to_grade(avg_score: float) -> str:
-    """평균 점수를 등급 문자열로 변환합니다."""
-    if avg_score >= 80:
-        return "안전"
-    elif avg_score >= 60:
+def _score_to_grade(segments: list) -> str:
+    """구간 등급 비율로 경로 전체 등급을 결정합니다 (상대평가 기반)."""
+    if not segments:
         return "보통"
-    elif avg_score >= 40:
-        return "주의"
-    else:
+    total = len(segments)
+    safe_cnt = sum(1 for s in segments if s.grade == "안전")
+    danger_cnt = sum(1 for s in segments if s.grade == "위험")
+    if danger_cnt / total >= 0.3:
         return "위험"
+    if safe_cnt / total >= 0.5:
+        return "안전"
+    return "보통"
 
 
 # ── 엔드포인트 ────────────────────────────────────────────────────────────────
 
 @router.post("/safe-route", response_model=RouteResponse)
 def get_safe_route(req: RouteRequest):
-    """카카오모빌리티 API로 경로를 조회하고 각 경로의 안전점수를 계산합니다."""
-    api_key = os.getenv("KAKAO_REST_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="KAKAO_REST_API_KEY 환경변수가 설정되지 않았습니다.")
+    """TMAP 도보 경로 API로 경로를 조회하고 각 경로의 안전점수를 계산합니다."""
+    tmap_key = os.getenv("TMAP_APP_KEY")
+    if not tmap_key:
+        raise HTTPException(status_code=500, detail="TMAP_APP_KEY 환경변수가 설정되지 않았습니다.")
 
-    params = {
-        "origin": f"{req.origin_lng},{req.origin_lat}",
-        "destination": f"{req.dest_lng},{req.dest_lat}",
-        "alternatives": "true",
+    headers = {
+        "appKey": tmap_key,
+        "Content-Type": "application/json",
     }
-    headers = {"Authorization": f"KakaoAK {api_key}"}
+    body = {
+        "startX": str(req.origin_lng),
+        "startY": str(req.origin_lat),
+        "endX": str(req.dest_lng),
+        "endY": str(req.dest_lat),
+        "reqCoordType": "WGS84GEO",
+        "resCoordType": "WGS84GEO",
+        "startName": "출발지",
+        "endName": "도착지",
+    }
 
     try:
         with httpx.Client(timeout=10.0) as client:
-            resp = client.get(KAKAO_DIRECTIONS_URL, params=params, headers=headers)
+            resp = client.post(TMAP_PEDESTRIAN_URL, headers=headers, json=body)
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=502, detail=f"카카오 API 오류: {e.response.status_code}")
+        raise HTTPException(status_code=502, detail=f"TMAP API 오류: {e.response.status_code} {e.response.text}")
     except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"카카오 API 연결 실패: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"TMAP API 연결 실패: {str(e)}")
 
     data = resp.json()
-    kakao_routes = data.get("routes", [])
-    if not kakao_routes:
+    features = data.get("features", [])
+    if not features:
         raise HTTPException(status_code=404, detail="경로를 찾을 수 없습니다.")
 
-    results: List[RouteResult] = []
-    for kakao_route in kakao_routes:
-        # duration: 초 → 분 변환
-        summary = kakao_route.get("summary", {})
-        duration_sec = summary.get("duration", 0)
-        duration_min = round(duration_sec / 60)
+    # 소요시간 추출 (첫 번째 feature의 properties)
+    duration_sec = features[0].get("properties", {}).get("totalTime", 0)
+    duration_min = round(duration_sec / 60)
 
-        # 좌표 추출 및 200m 간격 샘플링
-        coords = _extract_coords(kakao_route)
-        sampled = _sample_coords(coords)
+    # 좌표 추출
+    coords = _extract_tmap_coords(features)
+    if not coords:
+        raise HTTPException(status_code=404, detail="경로 좌표를 찾을 수 없습니다.")
 
-        if not sampled:
-            continue
+    # 안전점수 계산용: 100m 간격 샘플링
+    sampled = _sample_coords(coords)
 
-        # 각 샘플 좌표의 안전점수 계산
-        segments: List[SegmentScore] = []
-        score_sum = 0.0
-        for lat, lng in sampled:
-            score, grade = _score_for_coord(lat, lng)
-            segments.append(SegmentScore(lat=lat, lng=lng, score=score, grade=grade))
-            score_sum += score
+    segments: List[SegmentScore] = []
+    score_sum = 0.0
+    for lat, lng in sampled:
+        score, grade = _score_for_coord(lat, lng)
+        segments.append(SegmentScore(lat=lat, lng=lng, score=score, grade=grade))
+        score_sum += score
 
-        avg_score = round(score_sum / len(segments), 1)
-        route_grade = _score_to_grade(avg_score)
-        points = [[lat, lng] for lat, lng in sampled]
+    avg_score = round(score_sum / len(segments), 1)
+    route_grade = _score_to_grade(segments)
 
-        results.append(RouteResult(
-            type="",  # 아래에서 레이블링
-            points=points,
-            segments=segments,
-            avg_score=avg_score,
-            grade=route_grade,
-            duration=duration_min,
-        ))
+    # 지도 표시용: 원본 좌표 전체 사용
+    points = [[lat, lng] for lat, lng in coords]
 
-    if not results:
-        raise HTTPException(status_code=404, detail="유효한 경로를 찾을 수 없습니다.")
+    result = RouteResult(
+        type="safe",
+        points=points,
+        segments=segments,
+        avg_score=avg_score,
+        grade=route_grade,
+        duration=duration_min,
+    )
 
-    # avg_score가 가장 높은 경로 → "safe", 나머지 → "normal"
-    best_idx = max(range(len(results)), key=lambda i: results[i].avg_score)
-    results = [
-        r.model_copy(update={"type": "safe" if i == best_idx else "normal"})
-        for i, r in enumerate(results)
-    ]
-
-    return RouteResponse(routes=results)
+    return RouteResponse(routes=[result])
