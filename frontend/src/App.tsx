@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import styles from './App.module.css';
 
 const SILLIM_STATION = { lat: 37.4846, lng: 126.9294 };
@@ -65,12 +65,12 @@ type RouteId = 'safe' | 'normal';
 
 type MapPickTarget = 'origin' | 'destination';
 
-type RouteMock = {
+type RouteCardData = {
   id: RouteId;
   title: string;
-  score: number;
-  gradeLabel: string;
-  durationMin: number;
+  avg_score: number;
+  grade: string;
+  duration: number;
   riskNote: string;
 };
 
@@ -103,6 +103,118 @@ function formatLocationLabel(loc: LocationField): string {
   if (p && a) return `${p} · ${a}`;
   if (p) return p;
   return a;
+}
+
+/** POST /api/safe-route 응답의 경로 한 개 */
+type ApiRouteResult = {
+  type: string;
+  points: number[][];
+  segments: { lat: number; lng: number; score: number; grade: string }[];
+  avg_score: number;
+  grade: string;
+  duration: number;
+};
+
+const ROUTE_STROKE_WEIGHT = 6;
+
+/** 구간 등급별 선 색 (백엔드 segments.grade) */
+function segmentGradeColor(grade: string): string {
+  const g = grade.trim();
+  if (g === '안전') return '#4ade80';
+  if (g === '보통') return '#facc15';
+  if (g === '위험') return '#f87171';
+  if (g.includes('주의')) return '#facc15';
+  return '#facc15';
+}
+
+function buildColoredPolylines(
+  maps: KakaoGlobal['maps'],
+  points: number[][],
+  segments: { grade: string }[]
+): KakaoPolyline[] {
+  if (points.length < 2) return [];
+  const n = points.length;
+  const polylines: KakaoPolyline[] = [];
+  const ll = (i: number) => new maps.LatLng(points[i]![0], points[i]![1]);
+
+  let strokeColor = segmentGradeColor(segments[0]?.grade ?? '보통');
+  let path: KakaoLatLng[] = [ll(0), ll(1)];
+
+  for (let i = 1; i < n - 1; i++) {
+    const c = segmentGradeColor(segments[i]?.grade ?? '보통');
+    if (c === strokeColor) {
+      path.push(ll(i + 1));
+    } else {
+      polylines.push(
+        new maps.Polyline({
+          path,
+          strokeWeight: ROUTE_STROKE_WEIGHT,
+          strokeColor,
+          strokeOpacity: 0.95,
+          strokeStyle: 'solid',
+        })
+      );
+      strokeColor = c;
+      path = [ll(i), ll(i + 1)];
+    }
+  }
+  polylines.push(
+    new maps.Polyline({
+      path,
+      strokeWeight: ROUTE_STROKE_WEIGHT,
+      strokeColor,
+      strokeOpacity: 0.95,
+      strokeStyle: 'solid',
+    })
+  );
+  return polylines;
+}
+
+function fitMapToRoutePoints(map: KakaoMap, maps: KakaoGlobal['maps'], routeList: ApiRouteResult[]) {
+  const bounds = new maps.LatLngBounds();
+  for (const r of routeList) {
+    for (const pt of r.points) {
+      bounds.extend(new maps.LatLng(pt[0], pt[1]));
+    }
+  }
+  map.setBounds(bounds);
+}
+
+async function resolveLatLng(
+  geocoder: Geocoder,
+  loc: LocationField,
+  coordRef: MutableRefObject<{ lat: number; lng: number } | null>
+): Promise<{ lat: number; lng: number }> {
+  if (coordRef.current) {
+    return coordRef.current;
+  }
+  const q = formatLocationLabel(loc).trim();
+  if (!q) {
+    throw new Error('주소 또는 장소를 입력하거나 지도에서 선택하세요.');
+  }
+  return new Promise((resolve, reject) => {
+    geocoder.addressSearch(q, (result, status) => {
+      if (status !== window.kakao.maps.services.Status.OK || !result?.length) {
+        reject(new Error(`주소 검색에 실패했습니다: ${q}`));
+        return;
+      }
+      const lat = parseFloat(result[0]!.y);
+      const lng = parseFloat(result[0]!.x);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        reject(new Error('좌표로 변환하지 못했습니다.'));
+        return;
+      }
+      resolve({ lat, lng });
+    });
+  });
+}
+
+function riskNoteFromRoute(r: ApiRouteResult): string {
+  const hasDanger = r.segments.some((s) => s.grade.includes('위험'));
+  const hasMid = r.segments.some((s) => s.grade.includes('보통') || s.grade.includes('주의'));
+  if (hasDanger) return '경로에 위험 등급 구간이 포함되어 있습니다. 지도의 빨간 선을 확인하세요.';
+  if (hasMid) return '보통·주의 구간이 있습니다. 노란 선 구간을 확인하세요.';
+  return '대부분 안전 등급 구간입니다.';
 }
 
 function scoreBandClass(score: number): 'bandHigh' | 'bandMid' | 'bandLow' {
@@ -188,6 +300,24 @@ function loadKakaoSdk(): Promise<void> {
   return kakaoSdkLoadPromise;
 }
 
+function disposeRoutePolylines(mapRef: MutableRefObject<Partial<Record<RouteId, KakaoPolyline[]>>>) {
+  for (const list of Object.values(mapRef.current)) {
+    list?.forEach((p) => p.setMap(null));
+  }
+  mapRef.current = {};
+}
+
+function syncSelectedRoutePolylines(
+  selected: RouteId,
+  map: KakaoMap | null,
+  polyRef: MutableRefObject<Partial<Record<RouteId, KakaoPolyline[]>>>
+) {
+  if (!map) return;
+  (['safe', 'normal'] as const).forEach((id) => {
+    polyRef.current[id]?.forEach((p) => p.setMap(id === selected ? map : null));
+  });
+}
+
 function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<KakaoMap | null>(null);
@@ -198,6 +328,10 @@ function App() {
   const lightClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const showCctvRef = useRef(false);
   const showStreetlightRef = useRef(false);
+  const geocoderRef = useRef<Geocoder | null>(null);
+  const originCoordRef = useRef<{ lat: number; lng: number } | null>(null);
+  const destCoordRef = useRef<{ lat: number; lng: number } | null>(null);
+  const routePolylinesRef = useRef<Partial<Record<RouteId, KakaoPolyline[]>>>({});
 
   const [mapPickTarget, setMapPickTarget] = useState<MapPickTarget | null>(null);
   const [showCctv, setShowCctv] = useState(false);
@@ -207,6 +341,9 @@ function App() {
   const [now, setNow] = useState(() => new Date());
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState<RouteId>('safe');
+  const [routeApiResults, setRouteApiResults] = useState<ApiRouteResult[] | null>(null);
+  const [routeFetchLoading, setRouteFetchLoading] = useState(false);
+  const [routeFetchError, setRouteFetchError] = useState<string | null>(null);
   const [mapPointSafety, setMapPointSafety] = useState<MapPointSafety | null>(null);
   const [safetyLoading, setSafetyLoading] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
@@ -253,57 +390,117 @@ function App() {
 
   const canSearch = hasLocationValue(origin) && hasLocationValue(destination);
 
-  const routes = useMemo<RouteMock[]>(
-    () => [
-      {
-        id: 'safe',
-        title: '안전 경로',
-        score: 78,
-        gradeLabel: '안전',
-        durationMin: 18,
-        riskNote:
-          '대로 위주로 이동하며 주요 구간은 가로등이 확보되어 있습니다. 혼잡 시간대에는 유동인구가 많은 쪽으로 잠시 우회하는 것을 권장합니다.',
-      },
-      {
-        id: 'normal',
-        title: '일반 경로',
-        score: 41,
-        gradeLabel: '위험',
-        durationMin: 13,
-        riskNote: '신림로 구간은 가로등이 부족해 주의가 필요합니다.',
-      },
-    ],
-    []
-  );
+  const routes = useMemo<RouteCardData[]>(() => {
+    if (!routeApiResults?.length) return [];
+    return routeApiResults.map((r) => ({
+      id: r.type as RouteId,
+      title: r.type === 'safe' ? '안전 경로' : '일반 경로',
+      avg_score: r.avg_score,
+      grade: r.grade,
+      duration: r.duration,
+      riskNote: riskNoteFromRoute(r),
+    }));
+  }, [routeApiResults]);
 
   const selectedRoute = routes.find((r) => r.id === selectedRouteId) ?? routes[0];
 
   const handleFindRoute = () => {
     if (!canSearch) return;
-    setHasSearched(true);
-    setSelectedRouteId('safe');
+    void (async () => {
+      setHasSearched(true);
+      setRouteFetchLoading(true);
+      setRouteFetchError(null);
+      disposeRoutePolylines(routePolylinesRef);
+      setRouteApiResults(null);
+      try {
+        const geocoder = geocoderRef.current;
+        if (!geocoder) {
+          throw new Error('지도가 아직 준비되지 않았습니다. 잠시 후 다시 시도하세요.');
+        }
+        const { lat: origin_lat, lng: origin_lng } = await resolveLatLng(geocoder, origin, originCoordRef);
+        const { lat: dest_lat, lng: dest_lng } = await resolveLatLng(geocoder, destination, destCoordRef);
+
+        const res = await fetch(`${SAFETY_API_BASE}/api/safe-route`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            origin_lat,
+            origin_lng,
+            dest_lat,
+            dest_lng,
+          }),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(errText || `서버 오류 ${res.status}`);
+        }
+
+        const data = (await res.json()) as { routes?: ApiRouteResult[] };
+        const list = data.routes;
+        if (!list?.length) {
+          throw new Error('경로 응답이 비어 있습니다.');
+        }
+
+        const kakaoMaps = window.kakao?.maps;
+        const map = mapInstanceRef.current;
+        if (!kakaoMaps || !map) {
+          throw new Error('지도 객체를 찾을 수 없습니다.');
+        }
+
+        const nextPolylines: Partial<Record<RouteId, KakaoPolyline[]>> = {};
+        for (const r of list) {
+          const id = r.type as RouteId;
+          nextPolylines[id] = buildColoredPolylines(kakaoMaps, r.points, r.segments);
+        }
+        routePolylinesRef.current = nextPolylines;
+        fitMapToRoutePoints(map, kakaoMaps, list);
+
+        setRouteApiResults(list);
+        setSelectedRouteId('safe');
+        syncSelectedRoutePolylines('safe', map, routePolylinesRef);
+      } catch (e) {
+        disposeRoutePolylines(routePolylinesRef);
+        setRouteApiResults(null);
+        setRouteFetchError(e instanceof Error ? e.message : '경로를 찾지 못했습니다.');
+      } finally {
+        setRouteFetchLoading(false);
+      }
+    })();
   };
 
   const clearOrigin = () => {
     setOrigin(emptyLocation());
+    originCoordRef.current = null;
     originMarkerRef.current?.setMap(null);
     originMarkerRef.current = null;
     setMapPickTarget((prev) => (prev === 'origin' ? null : prev));
     setHasSearched(false);
+    disposeRoutePolylines(routePolylinesRef);
+    setRouteApiResults(null);
+    setRouteFetchError(null);
   };
 
   const clearDestination = () => {
     setDestination(emptyLocation());
+    destCoordRef.current = null;
     destMarkerRef.current?.setMap(null);
     destMarkerRef.current = null;
     setMapPickTarget((prev) => (prev === 'destination' ? null : prev));
     setHasSearched(false);
+    disposeRoutePolylines(routePolylinesRef);
+    setRouteApiResults(null);
+    setRouteFetchError(null);
   };
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    syncSelectedRoutePolylines(selectedRouteId, mapInstanceRef.current, routePolylinesRef);
+  }, [selectedRouteId]);
 
   useEffect(() => {
     const el = mapContainerRef.current;
@@ -336,6 +533,7 @@ function App() {
         mapInstanceRef.current = map;
 
         const geocoder = new kakao.maps.services.Geocoder();
+        geocoderRef.current = geocoder;
 
         const originImage = new kakao.maps.MarkerImage(
           pinSvgDataUrl('#2563eb'),
@@ -368,6 +566,7 @@ function App() {
 
             if (target === 'origin') {
               setOrigin(loc);
+              originCoordRef.current = { lat, lng };
               originMarkerRef.current?.setMap(null);
               const marker = new kakao.maps.Marker({
                 position: latlng,
@@ -377,6 +576,7 @@ function App() {
               originMarkerRef.current = marker;
             } else {
               setDestination(loc);
+              destCoordRef.current = { lat, lng };
               destMarkerRef.current?.setMap(null);
               const marker = new kakao.maps.Marker({
                 position: latlng,
@@ -471,6 +671,8 @@ function App() {
 
     return () => {
       cancelled = true;
+      disposeRoutePolylines(routePolylinesRef);
+      geocoderRef.current = null;
       mapInstanceRef.current = null;
       originMarkerRef.current = null;
       destMarkerRef.current = null;
@@ -634,9 +836,9 @@ function App() {
             type="button"
             className={styles.primaryButton}
             onClick={handleFindRoute}
-            disabled={!canSearch}
+            disabled={!canSearch || routeFetchLoading}
           >
-            안전 경로 찾기
+            {routeFetchLoading ? '경로 찾는 중…' : '안전 경로 찾기'}
           </button>
         </div>
 
@@ -692,12 +894,18 @@ function App() {
               <br />
               「안전 경로 찾기」를 눌러주세요.
             </div>
+          ) : routeFetchLoading ? (
+            <div className={styles.emptyState}>경로를 불러오는 중입니다…</div>
+          ) : routeFetchError ? (
+            <div className={styles.safetyPanelError}>{routeFetchError}</div>
+          ) : routes.length === 0 ? (
+            <div className={styles.emptyState}>표시할 경로가 없습니다.</div>
           ) : (
             <>
               <div className={styles.routeCards}>
                 {routes.map((r) => {
                   const selected = r.id === selectedRouteId;
-                  const band = scoreBandClass(r.score);
+                  const band = scoreBandClass(r.avg_score);
                   return (
                     <button
                       key={r.id}
@@ -708,21 +916,25 @@ function App() {
                     >
                       <div className={styles.routeCardHeader}>
                         <span className={styles.routeCardTitle}>{r.title}</span>
-                        <span className={`${styles.routeScore} ${styles[`score_${band}`]}`}>{r.score}점</span>
+                        <span className={`${styles.routeScore} ${styles[`score_${band}`]}`}>
+                          평균 {r.avg_score}점
+                        </span>
                       </div>
                       <div className={styles.routeCardMeta}>
-                        <span className={styles.routeGrade}>등급 {r.gradeLabel}</span>
-                        <span className={styles.routeTime}>소요 {r.durationMin}분</span>
+                        <span className={styles.routeGrade}>등급 {r.grade}</span>
+                        <span className={styles.routeTime}>소요 {r.duration}분</span>
                       </div>
                     </button>
                   );
                 })}
               </div>
 
-              <div className={styles.riskPanel}>
-                <div className={styles.riskPanelLabel}>선택 경로 · 위험 구간 안내</div>
-                <p className={styles.riskPanelText}>{selectedRoute.riskNote}</p>
-              </div>
+              {selectedRoute && (
+                <div className={styles.riskPanel}>
+                  <div className={styles.riskPanelLabel}>선택 경로 · 위험 구간 안내</div>
+                  <p className={styles.riskPanelText}>{selectedRoute.riskNote}</p>
+                </div>
+              )}
             </>
           )}
         </section>

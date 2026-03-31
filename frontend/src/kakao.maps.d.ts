@@ -1,12 +1,70 @@
 export {};
 
 declare global {
+  /** `addressSearch` 콜백 결과 (좌표는 문자열) */
+  interface AddressSearchResult {
+    x: string;
+    y: string;
+  }
+
+  interface Geocoder {
+    coord2Address(
+      lng: number,
+      lat: number,
+      callback: (result: Coord2AddressResult[] | null, status: string) => void
+    ): void;
+    addressSearch(
+      query: string,
+      callback: (result: AddressSearchResult[] | null, status: string) => void
+    ): void;
+  }
+
+  interface KakaoGlobal {
+    maps: {
+      load(callback: () => void): void;
+      LatLng: new (lat: number, lng: number) => KakaoLatLng;
+      LatLngBounds: new () => KakaoLatLngBounds;
+      Map: new (container: HTMLElement, options: KakaoMapOptions) => KakaoMap;
+      Polyline: new (options: KakaoPolylineOptions) => KakaoPolyline;
+      Marker: new (options: KakaoMarkerOptions) => KakaoMarker;
+      MarkerClusterer: new (options: KakaoMarkerClustererOptions) => KakaoMarkerClusterer;
+      MarkerImage: new (imageSrc: string, size: KakaoSize, options?: { offset?: KakaoPoint }) => KakaoMarkerImage;
+      Size: new (width: number, height: number) => KakaoSize;
+      Point: new (x: number, y: number) => KakaoPoint;
+      event: {
+        addListener(target: unknown, type: string, handler: (e: KakaoMouseEvent) => void): void;
+        removeListener(target: unknown, type: string, handler: (e: KakaoMouseEvent) => void): void;
+      };
+      services: {
+        Geocoder: new () => Geocoder;
+        Status: { OK: string };
+      };
+    };
+  }
+
   interface Window {
     kakao: KakaoGlobal;
   }
 
   interface KakaoMap {
     panBy(dx: number, dy: number): void;
+    setBounds(bounds: KakaoLatLngBounds): void;
+  }
+
+  interface KakaoLatLngBounds {
+    extend(latlng: KakaoLatLng): void;
+  }
+
+  interface KakaoPolyline {
+    setMap(map: KakaoMap | null): void;
+  }
+
+  interface KakaoPolylineOptions {
+    path: KakaoLatLng[];
+    strokeWeight?: number;
+    strokeColor?: string;
+    strokeOpacity?: number;
+    strokeStyle?: string;
   }
 
   interface KakaoLatLng {
@@ -68,33 +126,4 @@ declare global {
       building_name?: string | null;
     } | null;
   }
-}
-
-interface Geocoder {
-  coord2Address(
-    lng: number,
-    lat: number,
-    callback: (result: Coord2AddressResult[] | null, status: string) => void
-  ): void;
-}
-
-interface KakaoGlobal {
-  maps: {
-    load(callback: () => void): void;
-    LatLng: new (lat: number, lng: number) => KakaoLatLng;
-    Map: new (container: HTMLElement, options: KakaoMapOptions) => KakaoMap;
-    Marker: new (options: KakaoMarkerOptions) => KakaoMarker;
-    MarkerClusterer: new (options: KakaoMarkerClustererOptions) => KakaoMarkerClusterer;
-    MarkerImage: new (imageSrc: string, size: KakaoSize, options?: { offset?: KakaoPoint }) => KakaoMarkerImage;
-    Size: new (width: number, height: number) => KakaoSize;
-    Point: new (x: number, y: number) => KakaoPoint;
-    event: {
-      addListener(target: unknown, type: string, handler: (e: KakaoMouseEvent) => void): void;
-      removeListener(target: unknown, type: string, handler: (e: KakaoMouseEvent) => void): void;
-    };
-    services: {
-      Geocoder: new () => Geocoder;
-      Status: { OK: string };
-    };
-  };
 }
