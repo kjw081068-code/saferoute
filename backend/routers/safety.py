@@ -27,6 +27,7 @@ class SafetyScore(BaseModel):
     grade: str
     cctv_count: int
     light_count: int
+    conv_count: int
 
 
 @router.get("/safety-score", response_model=SafetyScore)
@@ -49,4 +50,5 @@ def get_safety_score(
         grade=str(row["grade"]),
         cctv_count=int(row["cctv_count"]),
         light_count=int(row["light_count"]),
+        conv_count=int(row["conv_count"]),
     )

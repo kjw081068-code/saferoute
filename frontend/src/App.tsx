@@ -88,6 +88,9 @@ type MapPointSafety = {
   grade: string;
   lat: number;
   lng: number;
+  cctv_count: number;
+  light_count: number;
+  conv_count: number;
 };
 
 /** 백엔드 grade → UI 색상 구분 */
@@ -132,13 +135,18 @@ function App() {
         if (!res.ok) {
           throw new Error(`서버 응답 ${res.status}`);
         }
-        const data = (await res.json()) as { score?: unknown; grade?: unknown };
+        const data = (await res.json()) as { score?: unknown; grade?: unknown; cctv_count?: unknown; light_count?: unknown; conv_count?: unknown };
         const score = Number(data.score);
         const grade = typeof data.grade === 'string' ? data.grade.trim() : '';
         if (!Number.isFinite(score) || !grade) {
           throw new Error('응답 형식이 올바르지 않습니다.');
         }
-        setMapPointSafety({ score, grade, lat, lng });
+        setMapPointSafety({
+          score, grade, lat, lng,
+          cctv_count: Number(data.cctv_count ?? 0),
+          light_count: Number(data.light_count ?? 0),
+          conv_count: Number(data.conv_count ?? 0),
+        });
       } catch (e) {
         setMapPointSafety(null);
         setSafetyError(e instanceof Error ? e.message : '안전 점수를 불러오지 못했습니다.');
@@ -458,6 +466,15 @@ function App() {
                 >
                   {mapPointSafety.grade}
                 </span>
+              </div>
+              <div className={styles.safetyDetailRow}>
+                <span>CCTV</span><span>{mapPointSafety.cctv_count}대</span>
+              </div>
+              <div className={styles.safetyDetailRow}>
+                <span>가로등</span><span>{mapPointSafety.light_count}개</span>
+              </div>
+              <div className={styles.safetyDetailRow}>
+                <span>편의점</span><span>{mapPointSafety.conv_count}개</span>
               </div>
               <div className={styles.safetyCoords}>
                 {mapPointSafety.lat.toFixed(5)}, {mapPointSafety.lng.toFixed(5)}
