@@ -155,6 +155,10 @@ function loadKakaoSdk(): Promise<void> {
   if (window.kakao?.maps) {
     return Promise.resolve();
   }
+  // index.html에서 이미 SDK 스크립트가 로드된 경우 (autoload=false → window.kakao만 존재)
+  if (window.kakao) {
+    return Promise.resolve();
+  }
   if (kakaoSdkLoadPromise) return kakaoSdkLoadPromise;
 
   kakaoSdkLoadPromise = new Promise<void>((resolve, reject) => {
