@@ -1,4 +1,4 @@
-`import sys, io
+import sys, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 import pandas as pd
@@ -6,11 +6,15 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 # ── 1. 데이터 로드 ────────────────────────────────────────────────
-cctv = pd.read_csv("cctv_sinlim.csv", encoding="utf-8")
-sl   = pd.read_csv("streetlight_sinlim.csv", encoding="utf-8")
+cctv = pd.read_csv("cctv_raw.csv", encoding="cp949")
+sl   = pd.read_csv("streetlight_raw.csv", encoding="cp949")
 
 cctv = cctv.rename(columns={"위도": "lat", "경도": "lng", "CCTV 수량": "qty"})
 sl   = sl.rename(columns={"위도": "lat", "경도": "lng"})
+
+# 유효하지 않은 좌표 제거 (서울 범위 벗어나는 행)
+cctv = cctv[(cctv["lat"] > 37.0) & (cctv["lat"] < 38.0) & (cctv["lng"] > 126.0) & (cctv["lng"] < 128.0)].reset_index(drop=True)
+sl   = sl[(sl["lat"] > 37.0) & (sl["lat"] < 38.0) & (sl["lng"] > 126.0) & (sl["lng"] < 128.0)].reset_index(drop=True)
 
 # ── 2. 위도/경도 → 미터 변환 함수 (Equirectangular 근사) ──────────
 REF_LAT = cctv["lat"].mean()          # 기준 위도

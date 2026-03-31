@@ -8,6 +8,53 @@ const MAP_PAN_STEP_PX = 120;
 
 const PIN_W = 30;
 const PIN_H = 42;
+/** CCTV·가로등 마커 이미지(픽셀) — `public/markers/*.svg` */
+const MAP_DOT_SIZE = 14;
+
+/**
+ * 클러스터 크기 단계(치킨 샘플과 동일 패턴). 줌이 바뀔 때마다 격자가 다시 계산되어
+ * 묶인 개수·원 크기가 자연스럽게 바뀜.
+ */
+const CLUSTER_CALCULATOR = [12, 45, 110, 360];
+
+function clusterCountText(count: number): string {
+  if (count > 999) return '999+';
+  return String(count);
+}
+
+/** CCTV=파랑, 가로등=주황 계열 — 클러스터 원만으로 구분 */
+function clusterStylesFor(kind: 'cctv' | 'streetlight'): Array<Record<string, string>> {
+  const fills: [string, string, string, string, string] =
+    kind === 'cctv'
+      ? [
+          'rgba(59, 130, 246, 0.9)',
+          'rgba(37, 99, 235, 0.92)',
+          'rgba(29, 78, 216, 0.94)',
+          'rgba(30, 58, 138, 0.95)',
+          'rgba(23, 37, 84, 0.96)',
+        ]
+      : [
+          'rgba(251, 191, 36, 0.92)',
+          'rgba(245, 158, 11, 0.92)',
+          'rgba(217, 119, 6, 0.94)',
+          'rgba(180, 83, 9, 0.95)',
+          'rgba(146, 64, 14, 0.96)',
+        ];
+  const sizes = [32, 40, 48, 56, 64];
+  return sizes.map((px, i) => ({
+    width: `${px}px`,
+    height: `${px}px`,
+    borderRadius: `${px / 2}px`,
+    background: fills[i],
+    color: '#fff',
+    textAlign: 'center',
+    fontWeight: '700',
+    lineHeight: `${px}px`,
+    fontSize: px >= 48 ? '14px' : '12px',
+    border: '2px solid rgba(255,255,255,0.92)',
+    boxSizing: 'border-box',
+  }));
+}
 
 function pinSvgDataUrl(fill: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PIN_W}" height="${PIN_H}" viewBox="0 0 30 42"><path fill="${fill}" stroke="rgba(0,0,0,0.22)" stroke-width="1" d="M15 2C8.4 2 3 7.2 3 13.5 3 19.5 15 40 15 40s12-20.5 12-26.5C27 7.2 21.6 2 15 2z"/><circle cx="15" cy="14" r="3.5" fill="#fff"/></svg>`;
@@ -125,7 +172,7 @@ function loadKakaoSdk(): Promise<void> {
     s.async = true;
     s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(
       key
-    )}&autoload=false&libraries=services`;
+    )}&autoload=false&libraries=services,clusterer`;
     s.onload = () => resolve();
     s.onerror = () => reject(new Error('카카오맵 SDK 로드에 실패했습니다.'));
     document.head.appendChild(s);
@@ -140,8 +187,14 @@ function App() {
   const originMarkerRef = useRef<KakaoMarker | null>(null);
   const destMarkerRef = useRef<KakaoMarker | null>(null);
   const mapPickTargetRef = useRef<MapPickTarget | null>(null);
+  const cctvClustererRef = useRef<KakaoMarkerClusterer | null>(null);
+  const lightClustererRef = useRef<KakaoMarkerClusterer | null>(null);
+  const showCctvRef = useRef(false);
+  const showStreetlightRef = useRef(false);
 
   const [mapPickTarget, setMapPickTarget] = useState<MapPickTarget | null>(null);
+  const [showCctv, setShowCctv] = useState(false);
+  const [showStreetlight, setShowStreetlight] = useState(false);
   const [origin, setOrigin] = useState<LocationField>(emptyLocation);
   const [destination, setDestination] = useState<LocationField>(emptyLocation);
   const [now, setNow] = useState(() => new Date());
@@ -154,6 +207,8 @@ function App() {
   const safetyFetchHandlerRef = useRef<(lat: number, lng: number) => void>(() => {});
 
   mapPickTargetRef.current = mapPickTarget;
+  showCctvRef.current = showCctv;
+  showStreetlightRef.current = showStreetlight;
 
   safetyFetchHandlerRef.current = (lat: number, lng: number) => {
     void (async () => {
@@ -324,6 +379,81 @@ function App() {
         };
 
         kakao.maps.event.addListener(map, 'click', handleMapClick);
+
+        // CCTV·가로등: 프론트 정적 JSON + 이미지 마커 (`public/data/map-points.json`, `public/markers/*.svg`)
+        const base = process.env.PUBLIC_URL || '';
+        const cctvIcon = new kakao.maps.MarkerImage(
+          `${base}/markers/cctv-dot.svg`,
+          new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+          { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
+        );
+        const lightIcon = new kakao.maps.MarkerImage(
+          `${base}/markers/streetlight-dot.svg`,
+          new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+          { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
+        );
+
+        void (async () => {
+          try {
+            const res = await fetch(`${base}/data/map-points.json`);
+            if (!res.ok) return;
+            if (cancelled) return;
+            const data = (await res.json()) as {
+              cctv: { lat: number; lng: number }[];
+              streetlight: { lat: number; lng: number }[];
+            };
+
+            const ClustererCtor = kakao.maps.MarkerClusterer;
+            if (!ClustererCtor) return;
+
+            const cctvMarkers = data.cctv.map(
+              (pt) =>
+                new kakao.maps.Marker({
+                  position: new kakao.maps.LatLng(pt.lat, pt.lng),
+                  image: cctvIcon,
+                })
+            );
+
+            const lightMarkers = data.streetlight.map(
+              (pt) =>
+                new kakao.maps.Marker({
+                  position: new kakao.maps.LatLng(pt.lat, pt.lng),
+                  image: lightIcon,
+                })
+            );
+
+            const mapNow = mapInstanceRef.current;
+            /** 1 = 모든 줌에서 클러스터 활성(레벨↑ 축소할 때만 켜지던 현상 제거) */
+            const clusterMinLevel = 1;
+            const cctvCluster = new ClustererCtor({
+              map: null,
+              averageCenter: true,
+              minLevel: clusterMinLevel,
+              calculator: CLUSTER_CALCULATOR,
+              texts: clusterCountText,
+              styles: clusterStylesFor('cctv'),
+              markers: cctvMarkers,
+            });
+            const lightCluster = new ClustererCtor({
+              map: null,
+              averageCenter: true,
+              minLevel: clusterMinLevel,
+              calculator: CLUSTER_CALCULATOR,
+              texts: clusterCountText,
+              styles: clusterStylesFor('streetlight'),
+              markers: lightMarkers,
+            });
+            cctvClustererRef.current = cctvCluster;
+            lightClustererRef.current = lightCluster;
+
+            if (mapNow) {
+              if (showCctvRef.current) cctvCluster.setMap(mapNow);
+              if (showStreetlightRef.current) lightCluster.setMap(mapNow);
+            }
+          } catch (_) {
+            // 정적 포인트 로드 실패 시 무시
+          }
+        })();
       });
     })();
 
@@ -332,6 +462,10 @@ function App() {
       mapInstanceRef.current = null;
       originMarkerRef.current = null;
       destMarkerRef.current = null;
+      cctvClustererRef.current?.setMap(null);
+      lightClustererRef.current?.setMap(null);
+      cctvClustererRef.current = null;
+      lightClustererRef.current = null;
       if (el) {
         el.innerHTML = '';
       }
@@ -340,6 +474,20 @@ function App() {
 
   const panMap = (dx: number, dy: number) => {
     mapInstanceRef.current?.panBy(dx, dy);
+  };
+
+  const toggleCctv = () => {
+    const next = !showCctv;
+    setShowCctv(next);
+    const map = next ? mapInstanceRef.current : null;
+    cctvClustererRef.current?.setMap(map);
+  };
+
+  const toggleStreetlight = () => {
+    const next = !showStreetlight;
+    setShowStreetlight(next);
+    const map = next ? mapInstanceRef.current : null;
+    lightClustererRef.current?.setMap(map);
   };
 
   return (
@@ -569,6 +717,24 @@ function App() {
 
         <div className={styles.mapShell}>
           <div ref={mapContainerRef} className={styles.mapCanvas} aria-label="카카오맵" />
+          <div className={styles.layerTogglePanel}>
+            <button
+              type="button"
+              className={`${styles.layerToggleBtn} ${showCctv ? styles.layerToggleBtnCctv : styles.layerToggleBtnOff}`}
+              onClick={toggleCctv}
+              aria-pressed={showCctv}
+            >
+              📷 CCTV
+            </button>
+            <button
+              type="button"
+              className={`${styles.layerToggleBtn} ${showStreetlight ? styles.layerToggleBtnLight : styles.layerToggleBtnOff}`}
+              onClick={toggleStreetlight}
+              aria-pressed={showStreetlight}
+            >
+              💡 가로등
+            </button>
+          </div>
           <div className={styles.mapOverlay} aria-hidden>
             <div className={styles.mapPlaceholderInner}>
               <div className={styles.mapPlaceholderTitle}>카카오맵</div>
