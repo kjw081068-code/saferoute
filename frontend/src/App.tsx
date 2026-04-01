@@ -240,7 +240,7 @@ function pickAddressFromGeocodeResult(r: Coord2AddressResult): string {
   return r.address.address_name;
 }
 
-const SAFETY_API_BASE = 'http://localhost:8000';
+const SAFETY_API_BASE = process.env.REACT_APP_API_URL?.trim() || 'http://localhost:8000';
 
 type MapPointSafety = {
   score: number;
