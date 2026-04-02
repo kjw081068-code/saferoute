@@ -116,6 +116,8 @@ type ApiRouteResult = {
 };
 
 const ROUTE_STROKE_WEIGHT = 6;
+/** 일반 경로(백엔드 type normal) 단색 */
+const NORMAL_ROUTE_BLUE = '#2563eb';
 
 /** 구간 등급별 선 색 (백엔드 segments.grade) */
 function segmentGradeColor(grade: string): string {
@@ -200,6 +202,21 @@ function buildPolylinesFromSegments(
     );
   }
   return polylines;
+}
+
+/** 일반 경로: points 전체를 파란 Polyline 한 줄로 */
+function buildNormalRouteBluePolylines(maps: KakaoGlobal['maps'], points: number[][]): KakaoPolyline[] {
+  if (points.length < 2) return [];
+  const path = points.map(([lat, lng]) => new maps.LatLng(lat, lng));
+  return [
+    new maps.Polyline({
+      path,
+      strokeWeight: ROUTE_STROKE_WEIGHT,
+      strokeColor: NORMAL_ROUTE_BLUE,
+      strokeOpacity: 0.92,
+      strokeStyle: 'solid',
+    }),
+  ];
 }
 
 function fitMapToRoutePoints(map: KakaoMap, maps: KakaoGlobal['maps'], routeList: ApiRouteResult[]) {
@@ -339,14 +356,14 @@ function disposeRoutePolylines(mapRef: MutableRefObject<Partial<Record<RouteId, 
   mapRef.current = {};
 }
 
-function syncSelectedRoutePolylines(
-  selected: RouteId,
+/** 안전·일반 경로 폴리라인을 동시에 표시 (일반 파랑을 먼저 깔고 안전 색상을 위에) */
+function showAllRoutePolylinesOnMap(
   map: KakaoMap | null,
   polyRef: MutableRefObject<Partial<Record<RouteId, KakaoPolyline[]>>>
 ) {
   if (!map) return;
-  (['safe', 'normal'] as const).forEach((id) => {
-    polyRef.current[id]?.forEach((p) => p.setMap(id === selected ? map : null));
+  (['normal', 'safe'] as const).forEach((id) => {
+    polyRef.current[id]?.forEach((p) => p.setMap(map));
   });
 }
 
@@ -486,7 +503,11 @@ function App() {
         const nextPolylines: Partial<Record<RouteId, KakaoPolyline[]>> = {};
         for (const r of list) {
           const id = r.type as RouteId;
-          nextPolylines[id] = buildPolylinesFromSegments(kakaoMaps, r.points, r.segments);
+          if (id === 'normal') {
+            nextPolylines[id] = buildNormalRouteBluePolylines(kakaoMaps, r.points);
+          } else {
+            nextPolylines[id] = buildPolylinesFromSegments(kakaoMaps, r.points, r.segments);
+          }
         }
         routePolylinesRef.current = nextPolylines;
 
@@ -494,7 +515,8 @@ function App() {
         const initialId = (hasSafe ? 'safe' : (list[0]!.type as RouteId)) as RouteId;
         setRouteApiResults(list);
         setSelectedRouteId(initialId);
-        syncSelectedRoutePolylines(initialId, map, routePolylinesRef);
+        showAllRoutePolylinesOnMap(map, routePolylinesRef);
+        fitMapToRoutePoints(map, kakaoMaps, list);
       } catch (e) {
         disposeRoutePolylines(routePolylinesRef);
         setRouteApiResults(null);
@@ -533,20 +555,6 @@ function App() {
     const t = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(t);
   }, []);
-
-  useEffect(() => {
-    syncSelectedRoutePolylines(selectedRouteId, mapInstanceRef.current, routePolylinesRef);
-  }, [selectedRouteId]);
-
-  /** 선택된 경로만 지도 범위에 맞춤 (카드 전환 시) */
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    const kakaoMaps = window.kakao?.maps;
-    if (!map || !kakaoMaps || !routeApiResults?.length) return;
-    const picked = routeApiResults.find((r) => (r.type as RouteId) === selectedRouteId);
-    if (!picked?.points?.length) return;
-    fitMapToRoutePoints(map, kakaoMaps, [picked]);
-  }, [selectedRouteId, routeApiResults]);
 
   useEffect(() => {
     const el = mapContainerRef.current;
