@@ -83,6 +83,8 @@ declare global {
 
   interface KakaoMarkerClusterer {
     setMap(map: KakaoMap | null): void;
+    addMarkers(markers: KakaoMarker[]): void;
+    clear(): void;
   }
 
   interface KakaoMarkerClustererOptions {

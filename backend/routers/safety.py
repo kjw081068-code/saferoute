@@ -31,6 +31,7 @@ class SafetyScore(BaseModel):
     cctv_count: int
     light_count: int
     conv_count: int
+    ent_count: int
 
 
 class LatLng(BaseModel):
@@ -83,4 +84,5 @@ def get_safety_score(
         cctv_count=int(row["cctv_count"]),
         light_count=int(row["light_count"]),
         conv_count=int(row["conv_count"]),
+        ent_count=int(row["ent_count"]),
     )
