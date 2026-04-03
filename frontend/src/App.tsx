@@ -96,6 +96,9 @@ type LocationField = {
   address: string;
 };
 
+/** TMAP POI 검색 결과 한 항목 */
+type PoiItem = { name: string; address: string; lat: number; lng: number };
+
 const emptyLocation = (): LocationField => ({ placeName: '', address: '' });
 
 function hasLocationValue(loc: LocationField): boolean {
@@ -414,6 +417,18 @@ function App() {
   const [showConv, setShowConv] = useState(false);
   const [origin, setOrigin] = useState<LocationField>(emptyLocation);
   const [destination, setDestination] = useState<LocationField>(emptyLocation);
+  const [originQuery, setOriginQuery] = useState('');
+  const [destQuery, setDestQuery] = useState('');
+  const [originSuggestions, setOriginSuggestions] = useState<PoiItem[]>([]);
+  const [destSuggestions, setDestSuggestions] = useState<PoiItem[]>([]);
+  const [activeSearchInput, setActiveSearchInput] = useState<'origin' | 'destination' | null>(null);
+  const searchBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingEnterRef = useRef<{ origin: string | null; destination: string | null }>({ origin: null, destination: null });
+  const originQueryRef = useRef('');
+  const destQueryRef = useRef('');
+  // 현재 suggestions가 어떤 쿼리에 대한 결과인지 추적
+  const originSuggestionsQueryRef = useRef('');
+  const destSuggestionsQueryRef = useRef('');
   const [now, setNow] = useState(() => new Date());
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState<RouteId>('safe');
@@ -427,6 +442,59 @@ function App() {
   const safetyFetchHandlerRef = useRef<(lat: number, lng: number) => void>(() => {});
 
   mapPickTargetRef.current = mapPickTarget;
+  originQueryRef.current = originQuery;
+  destQueryRef.current = destQuery;
+
+  const buildPoiUrl = (q: string) => {
+    const base = `${SAFETY_API_BASE}/api/search-poi?q=${encodeURIComponent(q)}&count=5`;
+    const center = mapInstanceRef.current?.getCenter();
+    if (center) {
+      return `${base}&center_lat=${center.getLat()}&center_lng=${center.getLng()}`;
+    }
+    return base;
+  };
+
+  // 출발지 검색 debounce
+  useEffect(() => {
+    if (originQuery.trim().length < 2) { setOriginSuggestions([]); return; }
+    const q = originQuery;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(buildPoiUrl(q));
+        if (!res.ok) return;
+        const data = (await res.json()) as { results?: PoiItem[] };
+        originSuggestionsQueryRef.current = q;
+        setOriginSuggestions(data.results ?? []);
+      } catch { setOriginSuggestions([]); }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [originQuery]);
+
+  // 도착지 검색 debounce
+  useEffect(() => {
+    if (destQuery.trim().length < 2) { setDestSuggestions([]); return; }
+    const q = destQuery;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(buildPoiUrl(q));
+        if (!res.ok) return;
+        const data = (await res.json()) as { results?: PoiItem[] };
+        destSuggestionsQueryRef.current = q;
+        setDestSuggestions(data.results ?? []);
+      } catch { setDestSuggestions([]); }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [destQuery]);
+
+  const handleSearchFocus = (target: 'origin' | 'destination') => {
+    if (searchBlurTimerRef.current) clearTimeout(searchBlurTimerRef.current);
+    setActiveSearchInput(target);
+  };
+
+  const handleSearchBlur = () => {
+    searchBlurTimerRef.current = setTimeout(() => setActiveSearchInput(null), 150);
+  };
+
   showCctvRef.current = showCctv;
   showStreetlightRef.current = showStreetlight;
   showEntRef.current = showEnt;
@@ -559,6 +627,8 @@ function App() {
 
   const clearOrigin = () => {
     setOrigin(emptyLocation());
+    setOriginQuery('');
+    setOriginSuggestions([]);
     originCoordRef.current = null;
     originMarkerRef.current?.setMap(null);
     originMarkerRef.current = null;
@@ -571,6 +641,8 @@ function App() {
 
   const clearDestination = () => {
     setDestination(emptyLocation());
+    setDestQuery('');
+    setDestSuggestions([]);
     destCoordRef.current = null;
     destMarkerRef.current?.setMap(null);
     destMarkerRef.current = null;
@@ -580,6 +652,75 @@ function App() {
     setRouteApiResults(null);
     setRouteFetchError(null);
   };
+
+  const handleSearchEnter = (target: 'origin' | 'destination', query: string) => {
+    const q = query.trim();
+    if (!q) return;
+    const suggestions = target === 'origin' ? originSuggestions : destSuggestions;
+    const suggestionsQuery = target === 'origin' ? originSuggestionsQueryRef.current : destSuggestionsQueryRef.current;
+    // suggestions가 현재 입력과 동일한 쿼리의 결과일 때만 즉시 선택
+    if (suggestions.length > 0 && suggestionsQuery.trim() === q) {
+      pendingEnterRef.current[target] = null;
+      handleSelectPoi(target, suggestions[0]!);
+    } else {
+      // stale 결과이거나 아직 없음 → 최신 결과 올 때까지 대기
+      pendingEnterRef.current[target] = q;
+    }
+  };
+
+  const handleSelectPoiRef = useRef<(target: 'origin' | 'destination', poi: PoiItem) => void>(() => {});
+
+  const handleSelectPoi = (target: 'origin' | 'destination', poi: PoiItem) => {
+    const loc: LocationField = { placeName: poi.name, address: poi.address };
+    const coord = { lat: poi.lat, lng: poi.lng };
+    const map = mapInstanceRef.current;
+    const kakaoMaps = window.kakao?.maps;
+
+    if (target === 'origin') {
+      setOrigin(loc);
+      setOriginQuery(poi.name);
+      setOriginSuggestions([]);
+      originCoordRef.current = coord;
+      if (map && kakaoMaps) {
+        const pos = new kakaoMaps.LatLng(poi.lat, poi.lng);
+        originMarkerRef.current?.setMap(null);
+        originMarkerRef.current = new kakaoMaps.Marker({ position: pos, map });
+      }
+    } else {
+      setDestination(loc);
+      setDestQuery(poi.name);
+      setDestSuggestions([]);
+      destCoordRef.current = coord;
+      if (map && kakaoMaps) {
+        const pos = new kakaoMaps.LatLng(poi.lat, poi.lng);
+        destMarkerRef.current?.setMap(null);
+        destMarkerRef.current = new kakaoMaps.Marker({ position: pos, map });
+      }
+    }
+  };
+  handleSelectPoiRef.current = handleSelectPoi;
+
+  // 출발지 suggestions 도착 시 pending enter 처리
+  useEffect(() => {
+    if (originSuggestions.length === 0) return;
+    const pending = pendingEnterRef.current.origin;
+    if (!pending) return;
+    // 방금 도착한 suggestions가 Enter 칠 때의 쿼리와 같을 때만 선택
+    if (originSuggestionsQueryRef.current.trim() !== pending) return;
+    pendingEnterRef.current.origin = null;
+    handleSelectPoiRef.current('origin', originSuggestions[0]!);
+  }, [originSuggestions]);
+
+  // 도착지 suggestions 도착 시 pending enter 처리
+  useEffect(() => {
+    if (destSuggestions.length === 0) return;
+    const pending = pendingEnterRef.current.destination;
+    if (!pending) return;
+    // 방금 도착한 suggestions가 Enter 칠 때의 쿼리와 같을 때만 선택
+    if (destSuggestionsQueryRef.current.trim() !== pending) return;
+    pendingEnterRef.current.destination = null;
+    handleSelectPoiRef.current('destination', destSuggestions[0]!);
+  }, [destSuggestions]);
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(new Date()), 1000);
@@ -650,6 +791,8 @@ function App() {
 
             if (target === 'origin') {
               setOrigin(loc);
+              setOriginQuery(formatLocationLabel(loc));
+              setOriginSuggestions([]);
               originCoordRef.current = { lat, lng };
               originMarkerRef.current?.setMap(null);
               const marker = new kakao.maps.Marker({
@@ -660,6 +803,8 @@ function App() {
               originMarkerRef.current = marker;
             } else {
               setDestination(loc);
+              setDestQuery(formatLocationLabel(loc));
+              setDestSuggestions([]);
               destCoordRef.current = { lat, lng };
               destMarkerRef.current?.setMap(null);
               const marker = new kakao.maps.Marker({
@@ -923,34 +1068,33 @@ function App() {
                 )}
                 <div className={styles.inputWrap}>
                   <input
-                    id="origin-place"
-                    aria-label="출발지 장소명"
+                    id="origin-search"
+                    aria-label="출발지 검색"
                     className={`${styles.input} ${styles.inputPlace} ${
                       mapPickTarget === 'origin' ? styles.inputActive : ''
                     }`}
-                    value={origin.placeName}
-                    onChange={(e) => setOrigin((o) => ({ ...o, placeName: e.target.value }))}
-                    onClick={() => setMapPickTarget('origin')}
-                    onFocus={() => setMapPickTarget('origin')}
-                    placeholder="건물·역·가게 이름 (있는 경우)"
+                    value={originQuery}
+                    onChange={(e) => { setOriginQuery(e.target.value); setMapPickTarget(null); }}
+                    onFocus={() => { setMapPickTarget('origin'); handleSearchFocus('origin'); }}
+                    onBlur={handleSearchBlur}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSearchEnter('origin', originQuery); }}
+                    placeholder="장소, 건물명, 주소로 검색"
                     autoComplete="off"
                   />
-                </div>
-                <div className={styles.addressFieldLabel}>주소</div>
-                <div className={styles.inputWrap}>
-                  <input
-                    id="origin-address"
-                    aria-label="출발지 주소"
-                    className={`${styles.input} ${styles.inputAddress} ${
-                      mapPickTarget === 'origin' ? styles.inputActive : ''
-                    }`}
-                    value={origin.address}
-                    onChange={(e) => setOrigin((o) => ({ ...o, address: e.target.value }))}
-                    onClick={() => setMapPickTarget('origin')}
-                    onFocus={() => setMapPickTarget('origin')}
-                    placeholder="주소"
-                    autoComplete="off"
-                  />
+                  {activeSearchInput === 'origin' && originSuggestions.length > 0 && (
+                    <ul className={styles.suggestionList}>
+                      {originSuggestions.map((poi, i) => (
+                        <li
+                          key={i}
+                          className={styles.suggestionItem}
+                          onMouseDown={() => handleSelectPoi('origin', poi)}
+                        >
+                          <span className={styles.suggestionName}>{poi.name}</span>
+                          <span className={styles.suggestionAddr}>{poi.address}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
               <span className={styles.fieldHint}>지도를 클릭해서 설정하세요</span>
@@ -982,34 +1126,33 @@ function App() {
                 )}
                 <div className={styles.inputWrap}>
                   <input
-                    id="destination-place"
-                    aria-label="도착지 장소명"
+                    id="destination-search"
+                    aria-label="도착지 검색"
                     className={`${styles.input} ${styles.inputPlace} ${
                       mapPickTarget === 'destination' ? styles.inputActive : ''
                     }`}
-                    value={destination.placeName}
-                    onChange={(e) => setDestination((o) => ({ ...o, placeName: e.target.value }))}
-                    onClick={() => setMapPickTarget('destination')}
-                    onFocus={() => setMapPickTarget('destination')}
-                    placeholder="건물·역·가게 이름 (있는 경우)"
+                    value={destQuery}
+                    onChange={(e) => { setDestQuery(e.target.value); setMapPickTarget(null); }}
+                    onFocus={() => { setMapPickTarget('destination'); handleSearchFocus('destination'); }}
+                    onBlur={handleSearchBlur}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSearchEnter('destination', destQuery); }}
+                    placeholder="장소, 건물명, 주소로 검색"
                     autoComplete="off"
                   />
-                </div>
-                <div className={styles.addressFieldLabel}>주소</div>
-                <div className={styles.inputWrap}>
-                  <input
-                    id="destination-address"
-                    aria-label="도착지 주소"
-                    className={`${styles.input} ${styles.inputAddress} ${
-                      mapPickTarget === 'destination' ? styles.inputActive : ''
-                    }`}
-                    value={destination.address}
-                    onChange={(e) => setDestination((o) => ({ ...o, address: e.target.value }))}
-                    onClick={() => setMapPickTarget('destination')}
-                    onFocus={() => setMapPickTarget('destination')}
-                    placeholder="주소"
-                    autoComplete="off"
-                  />
+                  {activeSearchInput === 'destination' && destSuggestions.length > 0 && (
+                    <ul className={styles.suggestionList}>
+                      {destSuggestions.map((poi, i) => (
+                        <li
+                          key={i}
+                          className={styles.suggestionItem}
+                          onMouseDown={() => handleSelectPoi('destination', poi)}
+                        >
+                          <span className={styles.suggestionName}>{poi.name}</span>
+                          <span className={styles.suggestionAddr}>{poi.address}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
               <span className={styles.fieldHint}>지도를 클릭해서 설정하세요</span>

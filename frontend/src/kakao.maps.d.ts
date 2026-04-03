@@ -49,6 +49,7 @@ declare global {
   interface KakaoMap {
     panBy(dx: number, dy: number): void;
     setBounds(bounds: KakaoLatLngBounds): void;
+    getCenter(): KakaoLatLng;
   }
 
   interface KakaoLatLngBounds {
