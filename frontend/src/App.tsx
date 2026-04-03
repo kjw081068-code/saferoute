@@ -38,8 +38,8 @@ function clusterCountText(count: number): string {
   return String(count);
 }
 
-/** CCTV=파랑, 가로등=주황 계열 — 클러스터 원만으로 구분 */
-function clusterStylesFor(kind: 'cctv' | 'streetlight'): Array<Record<string, string>> {
+/** CCTV=파랑, 가로등=주황, 유흥업소=빨강 계열 — 클러스터 원만으로 구분 */
+function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'entertainment' | 'convenience'): Array<Record<string, string>> {
   const fills: [string, string, string, string, string] =
     kind === 'cctv'
       ? [
@@ -49,12 +49,28 @@ function clusterStylesFor(kind: 'cctv' | 'streetlight'): Array<Record<string, st
           'rgba(30, 58, 138, 0.95)',
           'rgba(23, 37, 84, 0.96)',
         ]
-      : [
+      : kind === 'streetlight'
+      ? [
           'rgba(251, 191, 36, 0.92)',
           'rgba(245, 158, 11, 0.92)',
           'rgba(217, 119, 6, 0.94)',
           'rgba(180, 83, 9, 0.95)',
           'rgba(146, 64, 14, 0.96)',
+        ]
+      : kind === 'entertainment'
+      ? [
+          'rgba(239, 68, 68, 0.9)',
+          'rgba(220, 38, 38, 0.92)',
+          'rgba(185, 28, 28, 0.94)',
+          'rgba(153, 27, 27, 0.95)',
+          'rgba(127, 29, 29, 0.96)',
+        ]
+      : [
+          'rgba(22, 163, 74, 0.9)',
+          'rgba(21, 128, 61, 0.92)',
+          'rgba(20, 83, 45, 0.94)',
+          'rgba(14, 116, 144, 0.95)',
+          'rgba(6, 78, 59, 0.96)',
         ];
   const sizes = [32, 40, 48, 56, 64];
   return sizes.map((px, i) => ({
@@ -315,6 +331,7 @@ type MapPointSafety = {
   cctv_count: number;
   light_count: number;
   conv_count: number;
+  ent_count: number;
 };
 
 /** 백엔드 grade → UI 색상 구분 */
@@ -391,8 +408,16 @@ function App() {
   const mapPickTargetRef = useRef<MapPickTarget | null>(null);
   const cctvClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const lightClustererRef = useRef<KakaoMarkerClusterer | null>(null);
+  const entClustererRef = useRef<KakaoMarkerClusterer | null>(null);
+  const convClustererRef = useRef<KakaoMarkerClusterer | null>(null);
+  const cctvMarkersRef = useRef<KakaoMarker[]>([]);
+  const lightMarkersRef = useRef<KakaoMarker[]>([]);
+  const entMarkersRef = useRef<KakaoMarker[]>([]);
+  const convMarkersRef = useRef<KakaoMarker[]>([]);
   const showCctvRef = useRef(false);
   const showStreetlightRef = useRef(false);
+  const showEntRef = useRef(false);
+  const showConvRef = useRef(false);
   const geocoderRef = useRef<Geocoder | null>(null);
   const originCoordRef = useRef<{ lat: number; lng: number } | null>(null);
   /** `watchPosition` 반환 id — 언마운트·중지 시 clearWatch */
@@ -407,6 +432,8 @@ function App() {
   const [mapPickTarget, setMapPickTarget] = useState<MapPickTarget | null>(null);
   const [showCctv, setShowCctv] = useState(false);
   const [showStreetlight, setShowStreetlight] = useState(false);
+  const [showEnt, setShowEnt] = useState(false);
+  const [showConv, setShowConv] = useState(false);
   const [origin, setOrigin] = useState<LocationField>(emptyLocation);
   const [destination, setDestination] = useState<LocationField>(emptyLocation);
   const [now, setNow] = useState(() => new Date());
@@ -428,6 +455,8 @@ function App() {
   mapPickTargetRef.current = mapPickTarget;
   showCctvRef.current = showCctv;
   showStreetlightRef.current = showStreetlight;
+  showEntRef.current = showEnt;
+  showConvRef.current = showConv;
 
   safetyFetchHandlerRef.current = (lat: number, lng: number) => {
     void (async () => {
@@ -442,7 +471,7 @@ function App() {
         if (!res.ok) {
           throw new Error(`서버 응답 ${res.status}`);
         }
-        const data = (await res.json()) as { score?: unknown; grade?: unknown; cctv_count?: unknown; light_count?: unknown; conv_count?: unknown };
+        const data = (await res.json()) as { score?: unknown; grade?: unknown; cctv_count?: unknown; light_count?: unknown; conv_count?: unknown; ent_count?: unknown };
         const score = Number(data.score);
         const grade = typeof data.grade === 'string' ? data.grade.trim() : '';
         if (!Number.isFinite(score) || !grade) {
@@ -453,6 +482,7 @@ function App() {
           cctv_count: Number(data.cctv_count ?? 0),
           light_count: Number(data.light_count ?? 0),
           conv_count: Number(data.conv_count ?? 0),
+          ent_count: Number(data.ent_count ?? 0),
         });
       } catch (e) {
         setMapPointSafety(null);
@@ -720,7 +750,7 @@ function App() {
 
         kakao.maps.event.addListener(map, 'click', handleMapClick);
 
-        // CCTV·가로등: 프론트 정적 JSON + 이미지 마커 (`public/data/map-points.json`, `public/markers/*.svg`)
+        // CCTV·가로등·유흥업소: 프론트 정적 JSON + 이미지 마커 (`public/data/map-points.json`, `public/markers/*.svg`)
         const base = process.env.PUBLIC_URL || '';
         const cctvIcon = new kakao.maps.MarkerImage(
           `${base}/markers/cctv-dot.svg`,
@@ -729,6 +759,16 @@ function App() {
         );
         const lightIcon = new kakao.maps.MarkerImage(
           `${base}/markers/streetlight-dot.svg`,
+          new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+          { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
+        );
+        const entIcon = new kakao.maps.MarkerImage(
+          `${base}/markers/entertainment-dot.svg`,
+          new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+          { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
+        );
+        const convIcon = new kakao.maps.MarkerImage(
+          `${base}/markers/conv-dot.svg`,
           new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
           { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
         );
@@ -741,6 +781,8 @@ function App() {
             const data = (await res.json()) as {
               cctv: { lat: number; lng: number }[];
               streetlight: { lat: number; lng: number }[];
+              entertainment: { lat: number; lng: number }[];
+              convenience: { lat: number; lng: number }[];
             };
 
             const ClustererCtor = kakao.maps.MarkerClusterer;
@@ -753,6 +795,7 @@ function App() {
                   image: cctvIcon,
                 })
             );
+            cctvMarkersRef.current = cctvMarkers;
 
             const lightMarkers = data.streetlight.map(
               (pt) =>
@@ -761,6 +804,25 @@ function App() {
                   image: lightIcon,
                 })
             );
+            lightMarkersRef.current = lightMarkers;
+
+            const entMarkers = (data.entertainment ?? []).map(
+              (pt) =>
+                new kakao.maps.Marker({
+                  position: new kakao.maps.LatLng(pt.lat, pt.lng),
+                  image: entIcon,
+                })
+            );
+            entMarkersRef.current = entMarkers;
+
+            const convMarkers = (data.convenience ?? []).map(
+              (pt) =>
+                new kakao.maps.Marker({
+                  position: new kakao.maps.LatLng(pt.lat, pt.lng),
+                  image: convIcon,
+                })
+            );
+            convMarkersRef.current = convMarkers;
 
             const mapNow = mapInstanceRef.current;
             /** 1 = 모든 줌에서 클러스터 활성(레벨↑ 축소할 때만 켜지던 현상 제거) */
@@ -772,7 +834,6 @@ function App() {
               calculator: CLUSTER_CALCULATOR,
               texts: clusterCountText,
               styles: clusterStylesFor('cctv'),
-              markers: cctvMarkers,
             });
             const lightCluster = new ClustererCtor({
               map: null,
@@ -781,14 +842,45 @@ function App() {
               calculator: CLUSTER_CALCULATOR,
               texts: clusterCountText,
               styles: clusterStylesFor('streetlight'),
-              markers: lightMarkers,
+            });
+            const entCluster = new ClustererCtor({
+              map: null,
+              averageCenter: true,
+              minLevel: clusterMinLevel,
+              calculator: CLUSTER_CALCULATOR,
+              texts: clusterCountText,
+              styles: clusterStylesFor('entertainment'),
+            });
+            const convCluster = new ClustererCtor({
+              map: null,
+              averageCenter: true,
+              minLevel: clusterMinLevel,
+              calculator: CLUSTER_CALCULATOR,
+              texts: clusterCountText,
+              styles: clusterStylesFor('convenience'),
             });
             cctvClustererRef.current = cctvCluster;
             lightClustererRef.current = lightCluster;
+            entClustererRef.current = entCluster;
+            convClustererRef.current = convCluster;
 
             if (mapNow) {
-              if (showCctvRef.current) cctvCluster.setMap(mapNow);
-              if (showStreetlightRef.current) lightCluster.setMap(mapNow);
+              if (showCctvRef.current) {
+                cctvCluster.addMarkers(cctvMarkers);
+                cctvCluster.setMap(mapNow);
+              }
+              if (showStreetlightRef.current) {
+                lightCluster.addMarkers(lightMarkers);
+                lightCluster.setMap(mapNow);
+              }
+              if (showEntRef.current) {
+                entCluster.addMarkers(entMarkers);
+                entCluster.setMap(mapNow);
+              }
+              if (showConvRef.current) {
+                convCluster.addMarkers(convMarkers);
+                convCluster.setMap(mapNow);
+              }
             }
           } catch (_) {
             // 정적 포인트 로드 실패 시 무시
@@ -806,8 +898,12 @@ function App() {
       destMarkerRef.current = null;
       cctvClustererRef.current?.setMap(null);
       lightClustererRef.current?.setMap(null);
+      entClustererRef.current?.setMap(null);
+      convClustererRef.current?.setMap(null);
       cctvClustererRef.current = null;
       lightClustererRef.current = null;
+      entClustererRef.current = null;
+      convClustererRef.current = null;
       if (el) {
         el.innerHTML = '';
       }
@@ -821,15 +917,49 @@ function App() {
   const toggleCctv = () => {
     const next = !showCctv;
     setShowCctv(next);
-    const map = next ? mapInstanceRef.current : null;
-    cctvClustererRef.current?.setMap(map);
+    if (next) {
+      cctvClustererRef.current?.addMarkers(cctvMarkersRef.current);
+      cctvClustererRef.current?.setMap(mapInstanceRef.current);
+    } else {
+      cctvMarkersRef.current.forEach((m) => m.setMap(null));
+      cctvClustererRef.current?.clear();
+    }
   };
 
   const toggleStreetlight = () => {
     const next = !showStreetlight;
     setShowStreetlight(next);
-    const map = next ? mapInstanceRef.current : null;
-    lightClustererRef.current?.setMap(map);
+    if (next) {
+      lightClustererRef.current?.addMarkers(lightMarkersRef.current);
+      lightClustererRef.current?.setMap(mapInstanceRef.current);
+    } else {
+      lightMarkersRef.current.forEach((m) => m.setMap(null));
+      lightClustererRef.current?.clear();
+    }
+  };
+
+  const toggleEnt = () => {
+    const next = !showEnt;
+    setShowEnt(next);
+    if (next) {
+      entClustererRef.current?.addMarkers(entMarkersRef.current);
+      entClustererRef.current?.setMap(mapInstanceRef.current);
+    } else {
+      entMarkersRef.current.forEach((m) => m.setMap(null));
+      entClustererRef.current?.clear();
+    }
+  };
+
+  const toggleConv = () => {
+    const next = !showConv;
+    setShowConv(next);
+    if (next) {
+      convClustererRef.current?.addMarkers(convMarkersRef.current);
+      convClustererRef.current?.setMap(mapInstanceRef.current);
+    } else {
+      convMarkersRef.current.forEach((m) => m.setMap(null));
+      convClustererRef.current?.clear();
+    }
   };
 
   /** Geolocation → coord2Address → 출발지·좌표·파란 마커·지도 중심 (1회) */
@@ -1166,6 +1296,9 @@ function App() {
               <div className={styles.safetyDetailRow}>
                 <span>편의점</span><span>{mapPointSafety.conv_count}개</span>
               </div>
+              <div className={styles.safetyDetailRow}>
+                <span>유흥업소</span><span>{mapPointSafety.ent_count}개</span>
+              </div>
               <div className={styles.safetyCoords}>
                 {mapPointSafety.lat.toFixed(5)}, {mapPointSafety.lng.toFixed(5)}
               </div>
@@ -1255,6 +1388,22 @@ function App() {
               aria-pressed={showStreetlight}
             >
               💡 가로등
+            </button>
+            <button
+              type="button"
+              className={`${styles.layerToggleBtn} ${showEnt ? styles.layerToggleBtnEnt : styles.layerToggleBtnOff}`}
+              onClick={toggleEnt}
+              aria-pressed={showEnt}
+            >
+              🍺 유흥업소
+            </button>
+            <button
+              type="button"
+              className={`${styles.layerToggleBtn} ${showConv ? styles.layerToggleBtnConv : styles.layerToggleBtnOff}`}
+              onClick={toggleConv}
+              aria-pressed={showConv}
+            >
+              🏪 편의점
             </button>
           </div>
           <div className={styles.mapOverlay} aria-hidden>

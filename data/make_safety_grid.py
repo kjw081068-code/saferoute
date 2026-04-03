@@ -9,6 +9,7 @@ from scipy.spatial import cKDTree
 cctv = pd.read_csv("cctv_raw.csv", encoding="cp949")
 sl   = pd.read_csv("streetlight_gwanak.csv", encoding="utf-8-sig")
 conv = pd.read_csv("convenience_gwanak.csv", encoding="utf-8-sig")
+ent  = pd.read_csv("entertainment_gwanak.csv", encoding="utf-8-sig")
 
 cctv = cctv.rename(columns={"위도": "lat", "경도": "lng", "CCTV 수량": "qty"})
 sl   = sl.rename(columns={"위도": "lat", "경도": "lng"})
@@ -71,9 +72,20 @@ conv_scores = np.zeros(len(grid_xy))
 for i, idxs in enumerate(conv_tree.query_ball_point(grid_xy, r=100)):
     conv_scores[i] = min(len(idxs), 2) * 5  # 5점/개, 최대 10점
 
+# 유흥주점: 반경 100m, 최대 3개 캡, 감점
+ent["lat"] = ent["lat"].astype(float)
+ent["lng"] = ent["lng"].astype(float)
+ex, ey = to_xy(ent["lat"].values, ent["lng"].values)
+ent_tree = cKDTree(np.column_stack([ex, ey]))
+ent_counts = np.zeros(len(grid_xy), dtype=int)
+ent_deducts = np.zeros(len(grid_xy))
+for i, idxs in enumerate(ent_tree.query_ball_point(grid_xy, r=100)):
+    ent_counts[i] = min(len(idxs), 3)
+    ent_deducts[i] = ent_counts[i] * 3  # 3점/개, 최대 9점 감점
+
 # ── 6. 안전점수 계산 ─────────────────────────────────────────────
-# 기본 40점 + 가산점 (최대 95점)
-scores = 40 + cctv_scores + light_scores + conv_scores
+# 기본 40점 + 가산점 - 감점 (최소 10점 보장)
+scores = np.maximum(40 + cctv_scores + light_scores + conv_scores - ent_deducts, 10)
 
 # 등급: 상대평가 (하위 30% → 위험, 중위 40% → 보통, 상위 30% → 안전)
 n     = len(scores)
@@ -88,6 +100,7 @@ result = pd.DataFrame({
     "cctv_count":    (cctv_scores / 5).astype(int),
     "light_count":   (light_scores / 5).astype(int),
     "conv_count":    (conv_scores / 5).astype(int),
+    "ent_count":     ent_counts,
     "score":         scores.round(2),
     "grade":         grades,
 })

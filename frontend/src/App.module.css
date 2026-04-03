@@ -708,6 +708,18 @@
   color: #1a1a1a;
 }
 
+.layerToggleBtnEnt {
+  background: rgba(220, 38, 38, 0.85);
+  border-color: #dc2626;
+  color: #fff;
+}
+
+.layerToggleBtnConv {
+  background: rgba(22, 163, 74, 0.85);
+  border-color: #16a34a;
+  color: #fff;
+}
+
 .layerToggleBtnOff {
   background: rgba(40, 40, 40, 0.75);
   border-color: rgba(255, 255, 255, 0.15);

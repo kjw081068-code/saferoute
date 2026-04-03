@@ -126,6 +126,59 @@ def _score_to_grade(segments: list) -> str:
     return "보통"
 
 
+def _segment_midpoint(p1: Tuple[float, float], p2: Tuple[float, float]) -> Tuple[float, float]:
+    return ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+
+
+def _segment_angle(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+    """p1→p2 방향 각도 (라디안)"""
+    return math.atan2(p2[1] - p1[1], p2[0] - p1[0])
+
+
+def _angle_diff(a1: float, a2: float) -> float:
+    """두 각도의 차이 (0 ~ π)"""
+    diff = abs(a1 - a2) % (2 * math.pi)
+    return diff if diff <= math.pi else 2 * math.pi - diff
+
+
+def _remove_backtrack(
+    coords: List[Tuple[float, float]],
+    proximity_m: float = 15.0,
+    opposite_threshold: float = 2.09,  # 약 120° 이상이면 반대 방향으로 판단
+) -> List[Tuple[float, float]]:
+    """경로 내 역주행(같은 도로를 반대 방향으로 지나는) 구간을 제거합니다.
+
+    세그먼트 i와 세그먼트 j의 중간점이 proximity_m 이내이고
+    진행 방향이 반대(angle_diff > opposite_threshold)인 경우
+    i+1 ~ j 구간을 잘라내고 i에서 j+1로 바로 연결합니다.
+    """
+    if len(coords) < 4:
+        return coords
+
+    result = list(coords)
+    changed = True
+    while changed:
+        changed = False
+        n = len(result)
+        for i in range(n - 2):
+            mid_i = _segment_midpoint(result[i], result[i + 1])
+            dir_i = _segment_angle(result[i], result[i + 1])
+            for j in range(i + 1, n - 1):
+                mid_j = _segment_midpoint(result[j], result[j + 1])
+                if _haversine_m(mid_i[0], mid_i[1], mid_j[0], mid_j[1]) > proximity_m:
+                    continue
+                dir_j = _segment_angle(result[j], result[j + 1])
+                if _angle_diff(dir_i, dir_j) >= opposite_threshold:
+                    # i+1 ~ j 구간(역주행 왕복)을 제거하고 i → j+1 연결
+                    result = result[: i + 1] + result[j + 1 :]
+                    changed = True
+                    break
+            if changed:
+                break
+
+    return result
+
+
 def _call_tmap(headers: dict, body: dict) -> Optional[dict]:
     """TMAP 도보 API를 호출하고 응답 JSON을 반환합니다. 실패 시 None 반환."""
     try:
@@ -297,6 +350,7 @@ def _build_safe_route(req: RouteRequest, headers: dict) -> Optional[RouteResult]
     if not all_coords:
         return None
 
+    all_coords = _remove_backtrack(all_coords)
     return _build_route_result("safe", all_coords, total_duration_sec)
 
 
