@@ -1,10 +1,26 @@
-import React, { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import styles from './App.module.css';
 
 const SILLIM_STATION = { lat: 37.4846, lng: 126.9294 };
 const MAP_ZOOM_LEVEL = 4;
 /** `panBy` 한 번에 이동할 픽셀 (동네 줌 기준) */
 const MAP_PAN_STEP_PX = 120;
+
+/** 실시간 추적 시 coord2Address 호출 스로틀 (과다 요청·입력창 깜빡임 방지) */
+const REVERSE_GEOCODE_MIN_INTERVAL_MS = 18000;
+const REVERSE_GEOCODE_MIN_MOVE_M = 75;
+
+/** 두 좌표 간 거리(미터, 대략값) — 역지오코딩 스로틀용 */
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
 
 const PIN_W = 30;
 const PIN_H = 42;
@@ -379,6 +395,12 @@ function App() {
   const showStreetlightRef = useRef(false);
   const geocoderRef = useRef<Geocoder | null>(null);
   const originCoordRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** `watchPosition` 반환 id — 언마운트·중지 시 clearWatch */
+  const geoWatchIdRef = useRef<number | null>(null);
+  /** 마지막 역지오코딩 성공 시점·좌표 (스로틀) */
+  const lastOriginReverseGeocodeRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
+  /** 추적 세션당 첫 watch 콜백에서만 로딩/활성 state 갱신 (매 GPS 틱 리렌더 방지) */
+  const originTrackingFirstFixRef = useRef(false);
   const destCoordRef = useRef<{ lat: number; lng: number } | null>(null);
   const routePolylinesRef = useRef<Partial<Record<RouteId, KakaoPolyline[]>>>({});
 
@@ -396,6 +418,10 @@ function App() {
   const [mapPointSafety, setMapPointSafety] = useState<MapPointSafety | null>(null);
   const [safetyLoading, setSafetyLoading] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
+  const [originGeolocationLoading, setOriginGeolocationLoading] = useState(false);
+  const [originGeolocationError, setOriginGeolocationError] = useState<string | null>(null);
+  const [originTrackingActive, setOriginTrackingActive] = useState(false);
+  const [originTrackingLoading, setOriginTrackingLoading] = useState(false);
 
   const safetyFetchHandlerRef = useRef<(lat: number, lng: number) => void>(() => {});
 
@@ -527,11 +553,49 @@ function App() {
     })();
   };
 
+  const stopOriginTracking = useCallback(() => {
+    if (geoWatchIdRef.current != null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(geoWatchIdRef.current);
+    }
+    geoWatchIdRef.current = null;
+    originTrackingFirstFixRef.current = false;
+    setOriginTrackingActive(false);
+    setOriginTrackingLoading(false);
+  }, []);
+
+  /** 출발 파란 마커 위치·지도 중심만 갱신 (역지오코딩 없음) */
+  const syncOriginPinAndCenter = useCallback((lat: number, lng: number) => {
+    const maps = window.kakao?.maps;
+    const map = mapInstanceRef.current;
+    if (!maps || !map) return;
+    originCoordRef.current = { lat, lng };
+    const latlng = new maps.LatLng(lat, lng);
+    const existing = originMarkerRef.current;
+    if (existing) {
+      existing.setPosition(latlng);
+    } else {
+      const originImage = new maps.MarkerImage(
+        pinSvgDataUrl('#2563eb'),
+        new maps.Size(PIN_W, PIN_H),
+        { offset: new maps.Point(PIN_W / 2, PIN_H) }
+      );
+      originMarkerRef.current = new maps.Marker({
+        position: latlng,
+        map,
+        image: originImage,
+      });
+    }
+    map.setCenter(latlng);
+  }, []);
+
   const clearOrigin = () => {
+    stopOriginTracking();
+    lastOriginReverseGeocodeRef.current = null;
     setOrigin(emptyLocation());
     originCoordRef.current = null;
     originMarkerRef.current?.setMap(null);
     originMarkerRef.current = null;
+    setOriginGeolocationError(null);
     setMapPickTarget((prev) => (prev === 'origin' ? null : prev));
     setHasSearched(false);
     disposeRoutePolylines(routePolylinesRef);
@@ -555,6 +619,16 @@ function App() {
     const t = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(t);
   }, []);
+
+  useEffect(
+    () => () => {
+      if (geoWatchIdRef.current != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      }
+      geoWatchIdRef.current = null;
+    },
+    []
+  );
 
   useEffect(() => {
     const el = mapContainerRef.current;
@@ -758,6 +832,125 @@ function App() {
     lightClustererRef.current?.setMap(map);
   };
 
+  /** Geolocation → coord2Address → 출발지·좌표·파란 마커·지도 중심 (1회) */
+  const handleUseCurrentLocation = useCallback(() => {
+    if (originTrackingActive) return;
+    const maps = window.kakao?.maps;
+    const geocoder = geocoderRef.current;
+    const map = mapInstanceRef.current;
+    if (!maps || !geocoder || !map) {
+      setOriginGeolocationError('지도가 아직 준비되지 않았습니다.');
+      return;
+    }
+    if (!navigator.geolocation) {
+      setOriginGeolocationError('이 브라우저에서는 위치 정보를 사용할 수 없습니다.');
+      return;
+    }
+
+    setOriginGeolocationError(null);
+    setOriginGeolocationLoading(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        geocoder.coord2Address(lng, lat, (result, status) => {
+          setOriginGeolocationLoading(false);
+          if (status !== maps.services.Status.OK || !result?.length) {
+            setOriginGeolocationError('주소로 변환하지 못했습니다.');
+            return;
+          }
+          setOriginGeolocationError(null);
+          const loc = locationFromGeocodeResult(result[0]!);
+          setOrigin(loc);
+          lastOriginReverseGeocodeRef.current = { lat, lng, at: Date.now() };
+          syncOriginPinAndCenter(lat, lng);
+        });
+      },
+      (err) => {
+        setOriginGeolocationLoading(false);
+        // 1 = PERMISSION_DENIED
+        if (err.code === 1) {
+          setOriginGeolocationError('위치 권한을 허용해주세요');
+        } else {
+          setOriginGeolocationError('현재 위치를 가져오지 못했습니다.');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }, [originTrackingActive, syncOriginPinAndCenter]);
+
+  /** 실시간 추적: watchPosition으로 마커·지도 중심 갱신, 주소는 스로틀 역지오코딩 */
+  const handleToggleOriginTracking = useCallback(() => {
+    if (originTrackingActive) {
+      stopOriginTracking();
+      lastOriginReverseGeocodeRef.current = null;
+      setOriginGeolocationError(null);
+      return;
+    }
+
+    const maps = window.kakao?.maps;
+    const geocoder = geocoderRef.current;
+    const map = mapInstanceRef.current;
+    if (!maps || !geocoder || !map) {
+      setOriginGeolocationError('지도가 아직 준비되지 않았습니다.');
+      return;
+    }
+    if (!navigator.geolocation) {
+      setOriginGeolocationError('이 브라우저에서는 위치 정보를 사용할 수 없습니다.');
+      return;
+    }
+
+    setOriginGeolocationError(null);
+    originTrackingFirstFixRef.current = false;
+    setOriginTrackingLoading(true);
+
+    const maybeReverseGeocode = (lat: number, lng: number) => {
+      const now = Date.now();
+      const prev = lastOriginReverseGeocodeRef.current;
+      if (prev) {
+        const tooSoon = now - prev.at < REVERSE_GEOCODE_MIN_INTERVAL_MS;
+        const tooClose = haversineMeters(prev.lat, prev.lng, lat, lng) < REVERSE_GEOCODE_MIN_MOVE_M;
+        if (tooSoon && tooClose) return;
+      }
+      geocoder.coord2Address(lng, lat, (result, status) => {
+        if (status !== maps.services.Status.OK || !result?.length) return;
+        lastOriginReverseGeocodeRef.current = { lat, lng, at: Date.now() };
+        setOrigin(locationFromGeocodeResult(result[0]!));
+      });
+    };
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        syncOriginPinAndCenter(lat, lng);
+        if (!originTrackingFirstFixRef.current) {
+          originTrackingFirstFixRef.current = true;
+          setOriginTrackingLoading(false);
+          setOriginTrackingActive(true);
+        }
+        maybeReverseGeocode(lat, lng);
+      },
+      (err) => {
+        stopOriginTracking();
+        lastOriginReverseGeocodeRef.current = null;
+        if (err.code === 1) {
+          setOriginGeolocationError('위치 권한을 허용해주세요');
+        } else {
+          setOriginGeolocationError('실시간 위치를 가져오지 못했습니다.');
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+    );
+
+    geoWatchIdRef.current = watchId;
+  }, [
+    originTrackingActive,
+    stopOriginTracking,
+    syncOriginPinAndCenter,
+  ]);
+
   return (
     <div className={styles.app}>
       <aside className={styles.sidebar}>
@@ -824,6 +1017,48 @@ function App() {
                 </div>
               </div>
               <span className={styles.fieldHint}>지도를 클릭해서 설정하세요</span>
+            </div>
+            <div className={styles.currentLocationRow}>
+              <div className={styles.currentLocationBtnRow}>
+                <button
+                  type="button"
+                  className={styles.currentLocationBtn}
+                  onClick={handleUseCurrentLocation}
+                  disabled={originGeolocationLoading || originTrackingActive || originTrackingLoading}
+                  aria-busy={originGeolocationLoading}
+                  aria-label="현재 위치로 출발지 설정"
+                >
+                  {originGeolocationLoading ? (
+                    <span className={styles.geoSpinner} aria-hidden />
+                  ) : (
+                    <span aria-hidden>📍</span>
+                  )}
+                  현재 위치
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.currentLocationBtn} ${styles.currentLocationBtnTrack} ${
+                    originTrackingActive ? styles.currentLocationBtnTrackOn : ''
+                  }`}
+                  onClick={handleToggleOriginTracking}
+                  disabled={originTrackingLoading && !originTrackingActive}
+                  aria-busy={originTrackingLoading && !originTrackingActive}
+                  aria-pressed={originTrackingActive}
+                  aria-label={originTrackingActive ? '실시간 위치 추적 중지' : '실시간 위치 추적 시작'}
+                >
+                  {originTrackingLoading && !originTrackingActive ? (
+                    <span className={styles.geoSpinner} aria-hidden />
+                  ) : (
+                    <span aria-hidden>{originTrackingActive ? '⏹' : '📡'}</span>
+                  )}
+                  {originTrackingActive ? '추적 중지' : '실시간 추적'}
+                </button>
+              </div>
+              {originGeolocationError ? (
+                <div className={styles.currentLocationError} role="status" aria-live="polite">
+                  {originGeolocationError}
+                </div>
+              ) : null}
             </div>
           </div>
 

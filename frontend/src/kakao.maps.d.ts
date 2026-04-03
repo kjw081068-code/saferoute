@@ -49,6 +49,8 @@ declare global {
   interface KakaoMap {
     panBy(dx: number, dy: number): void;
     setBounds(bounds: KakaoLatLngBounds): void;
+    setCenter(latlng: KakaoLatLng): void;
+    setLevel(level: number): void;
   }
 
   interface KakaoLatLngBounds {
@@ -79,6 +81,7 @@ declare global {
 
   interface KakaoMarker {
     setMap(map: KakaoMap | null): void;
+    setPosition(latlng: KakaoLatLng): void;
   }
 
   interface KakaoMarkerClusterer {
