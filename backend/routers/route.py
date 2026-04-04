@@ -3,7 +3,7 @@ import os
 from typing import List, Optional, Tuple
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from routers.safety import _load_grid
@@ -11,8 +11,10 @@ from routers.safety import _load_grid
 router = APIRouter()
 
 TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
+TMAP_POI_URL = "https://apis.openapi.sk.com/tmap/pois"
 SAMPLE_INTERVAL_M = 100       # 안전점수 샘플링 간격 (미터)
-SAFE_ROUTE_MAX_DIST_M = 1000  # 안전경로 지원 최대 직선거리 (미터)
+# 직선거리 이하(미터): 안전(경유지)+일반 두 경로 모두 반환. 초과: 안전 경로만 반환.
+BOTH_ROUTES_MAX_DIST_M = 3000
 WAYPOINT_INTERVAL_M = 200     # 경유지 간격 (미터)
 PERP_OFFSET_M = 50            # 수직 이동 거리 (미터)
 
@@ -48,6 +50,17 @@ class RouteResult(BaseModel):
 
 class RouteResponse(BaseModel):
     routes: List[RouteResult]
+
+
+class PoiItem(BaseModel):
+    name: str
+    address: str
+    lat: float
+    lng: float
+
+
+class PoiSearchResponse(BaseModel):
+    results: List[PoiItem]
 
 
 # ── 내부 유틸 함수 ────────────────────────────────────────────────────────────
@@ -354,6 +367,33 @@ def _build_safe_route(req: RouteRequest, headers: dict) -> Optional[RouteResult]
     return _build_route_result("safe", all_coords, total_duration_sec)
 
 
+def _fetch_direct_pedestrian(
+    req: RouteRequest, headers: dict
+) -> Tuple[List[Tuple[float, float]], int]:
+    """출발→도착 직접 도보 경로 1회 TMAP 호출."""
+    body = {
+        "startX": str(req.origin_lng),
+        "startY": str(req.origin_lat),
+        "endX": str(req.dest_lng),
+        "endY": str(req.dest_lat),
+        "reqCoordType": "WGS84GEO",
+        "resCoordType": "WGS84GEO",
+        "startName": "출발지",
+        "endName": "도착지",
+    }
+    normal_data = _call_tmap(headers, body)
+    if normal_data is None:
+        raise HTTPException(status_code=502, detail="TMAP API 호출에 실패했습니다.")
+    features = normal_data.get("features", [])
+    if not features:
+        raise HTTPException(status_code=404, detail="경로를 찾을 수 없습니다.")
+    duration_sec = features[0].get("properties", {}).get("totalTime", 0)
+    coords = _extract_tmap_coords(features)
+    if not coords:
+        raise HTTPException(status_code=404, detail="경로 좌표를 찾을 수 없습니다.")
+    return coords, duration_sec
+
+
 # ── 엔드포인트 ────────────────────────────────────────────────────────────────
 
 @router.post("/safe-route", response_model=RouteResponse)
@@ -368,45 +408,65 @@ def get_safe_route(req: RouteRequest):
         "Content-Type": "application/json",
     }
 
-    # ── 일반 경로 호출 ──────────────────────────────────────────────────────
-    normal_body = {
-        "startX": str(req.origin_lng),
-        "startY": str(req.origin_lat),
-        "endX": str(req.dest_lng),
-        "endY": str(req.dest_lat),
-        "reqCoordType": "WGS84GEO",
-        "resCoordType": "WGS84GEO",
-        "startName": "출발지",
-        "endName": "도착지",
-    }
-
-    normal_data = _call_tmap(headers, normal_body)
-    if normal_data is None:
-        raise HTTPException(status_code=502, detail="TMAP API 호출에 실패했습니다.")
-
-    features = normal_data.get("features", [])
-    if not features:
-        raise HTTPException(status_code=404, detail="경로를 찾을 수 없습니다.")
-
-    normal_duration_sec = features[0].get("properties", {}).get("totalTime", 0)
-    normal_coords = _extract_tmap_coords(features)
-    if not normal_coords:
-        raise HTTPException(status_code=404, detail="경로 좌표를 찾을 수 없습니다.")
-
-    normal_result = _build_route_result("normal", normal_coords, normal_duration_sec)
-
-    # ── 직선거리 1km 초과 시 일반 경로만 반환 ──────────────────────────────
     straight_dist = _straight_distance_m(
         req.origin_lat, req.origin_lng, req.dest_lat, req.dest_lng
     )
-    if straight_dist > SAFE_ROUTE_MAX_DIST_M:
-        return RouteResponse(routes=[normal_result])
 
-    # ── 안전 경로 생성 ──────────────────────────────────────────────────────
+    # ── 3km 초과: 안전 경로(경유지)만. 실패 시 직접 도보 1회 결과를 safe 타입으로 ──
+    if straight_dist > BOTH_ROUTES_MAX_DIST_M:
+        safe_only = _build_safe_route(req, headers)
+        if safe_only is None:
+            coords, duration_sec = _fetch_direct_pedestrian(req, headers)
+            safe_only = _build_route_result("safe", coords, duration_sec)
+        return RouteResponse(routes=[safe_only])
+
+    # ── 3km 이하: 일반 + 안전 둘 다 (안전 생성 실패 시 일반 좌표로 safe 대체) ──
+    normal_coords, normal_duration_sec = _fetch_direct_pedestrian(req, headers)
+    normal_result = _build_route_result("normal", normal_coords, normal_duration_sec)
+
     safe_result = _build_safe_route(req, headers)
-
-    # 경유지 포함 TMAP 호출 실패 시 일반 경로 좌표로 safe 경로 대체
     if safe_result is None:
         safe_result = _build_route_result("safe", normal_coords, normal_duration_sec)
 
     return RouteResponse(routes=[safe_result, normal_result])
+
+
+@router.get("/search-poi", response_model=PoiSearchResponse)
+def search_poi(
+    q: str = Query(..., description="검색어"),
+    count: int = Query(default=5),
+    center_lat: Optional[float] = Query(default=None, description="지도 중심 위도"),
+    center_lng: Optional[float] = Query(default=None, description="지도 중심 경도"),
+):
+    """장소명·주소·건물명으로 TMAP POI를 검색하고 후보 목록을 반환합니다."""
+    tmap_key = (os.getenv("TMAP_APP_KEY") or "").strip()
+    if not tmap_key:
+        raise HTTPException(status_code=500, detail="TMAP_APP_KEY 환경변수가 설정되지 않았습니다.")
+    params: dict = {
+        "version": "1",
+        "searchKeyword": q,
+        "count": count,
+        "appKey": tmap_key,
+    }
+    if center_lat is not None and center_lng is not None:
+        params["centerLat"] = str(center_lat)
+        params["centerLon"] = str(center_lng)
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(TMAP_POI_URL, params=params)
+        resp.raise_for_status()
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        raise HTTPException(status_code=502, detail="TMAP POI 검색 API 호출에 실패했습니다.")
+
+    pois = resp.json().get("searchPoiInfo", {}).get("pois", {}).get("poi", [])
+    results = []
+    for poi in pois:
+        addr_list = poi.get("newAddressList", {}).get("newAddress", [])
+        addr = addr_list[0].get("fullAddressRoad", "") if addr_list else ""
+        try:
+            lat = float(poi.get("frontLat", 0))
+            lng = float(poi.get("frontLon", 0))
+        except (ValueError, TypeError):
+            continue
+        results.append(PoiItem(name=poi.get("name", ""), address=addr, lat=lat, lng=lng))
+    return PoiSearchResponse(results=results)

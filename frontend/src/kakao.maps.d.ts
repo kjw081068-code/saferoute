@@ -51,6 +51,7 @@ declare global {
     setBounds(bounds: KakaoLatLngBounds): void;
     setCenter(latlng: KakaoLatLng): void;
     setLevel(level: number): void;
+    getCenter(): KakaoLatLng;
   }
 
   interface KakaoLatLngBounds {
