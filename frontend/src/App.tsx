@@ -1255,6 +1255,49 @@ function App() {
             <div className={styles.label} id="origin-label">
               출발지
             </div>
+            {/* 검색 제안 목록(z-index 높음)에 가리지 않도록 GPS 버튼을 검색창 위에 둠 */}
+            <div className={styles.currentLocationRow}>
+              <div className={styles.currentLocationBtnRow}>
+                <button
+                  type="button"
+                  className={styles.currentLocationBtn}
+                  onClick={handleUseCurrentLocation}
+                  disabled={originGeolocationLoading || originTrackingActive || originTrackingLoading}
+                  aria-busy={originGeolocationLoading}
+                  aria-label="현재 위치로 출발지 설정"
+                >
+                  {originGeolocationLoading ? (
+                    <span className={styles.geoSpinner} aria-hidden />
+                  ) : (
+                    <span aria-hidden>📍</span>
+                  )}
+                  현재 위치
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.currentLocationBtn} ${styles.currentLocationBtnTrack} ${
+                    originTrackingActive ? styles.currentLocationBtnTrackOn : ''
+                  }`}
+                  onClick={handleToggleOriginTracking}
+                  disabled={originTrackingLoading && !originTrackingActive}
+                  aria-busy={originTrackingLoading && !originTrackingActive}
+                  aria-pressed={originTrackingActive}
+                  aria-label={originTrackingActive ? '실시간 위치 추적 중지' : '실시간 위치 추적 시작'}
+                >
+                  {originTrackingLoading && !originTrackingActive ? (
+                    <span className={styles.geoSpinner} aria-hidden />
+                  ) : (
+                    <span aria-hidden>{originTrackingActive ? '⏹' : '📡'}</span>
+                  )}
+                  {originTrackingActive ? '추적 중지' : '실시간 추적'}
+                </button>
+              </div>
+              {originGeolocationError ? (
+                <div className={styles.currentLocationError} role="status" aria-live="polite">
+                  {originGeolocationError}
+                </div>
+              ) : null}
+            </div>
             <div className={styles.inputRow}>
               <div
                 className={`${styles.locationColumn} ${hasLocationValue(origin) ? styles.locationColumnHasClear : ''}`}
@@ -1304,48 +1347,6 @@ function App() {
                 </div>
               </div>
               <span className={styles.fieldHint}>지도를 클릭해서 설정하세요</span>
-            </div>
-            <div className={styles.currentLocationRow}>
-              <div className={styles.currentLocationBtnRow}>
-                <button
-                  type="button"
-                  className={styles.currentLocationBtn}
-                  onClick={handleUseCurrentLocation}
-                  disabled={originGeolocationLoading || originTrackingActive || originTrackingLoading}
-                  aria-busy={originGeolocationLoading}
-                  aria-label="현재 위치로 출발지 설정"
-                >
-                  {originGeolocationLoading ? (
-                    <span className={styles.geoSpinner} aria-hidden />
-                  ) : (
-                    <span aria-hidden>📍</span>
-                  )}
-                  현재 위치
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.currentLocationBtn} ${styles.currentLocationBtnTrack} ${
-                    originTrackingActive ? styles.currentLocationBtnTrackOn : ''
-                  }`}
-                  onClick={handleToggleOriginTracking}
-                  disabled={originTrackingLoading && !originTrackingActive}
-                  aria-busy={originTrackingLoading && !originTrackingActive}
-                  aria-pressed={originTrackingActive}
-                  aria-label={originTrackingActive ? '실시간 위치 추적 중지' : '실시간 위치 추적 시작'}
-                >
-                  {originTrackingLoading && !originTrackingActive ? (
-                    <span className={styles.geoSpinner} aria-hidden />
-                  ) : (
-                    <span aria-hidden>{originTrackingActive ? '⏹' : '📡'}</span>
-                  )}
-                  {originTrackingActive ? '추적 중지' : '실시간 추적'}
-                </button>
-              </div>
-              {originGeolocationError ? (
-                <div className={styles.currentLocationError} role="status" aria-live="polite">
-                  {originGeolocationError}
-                </div>
-              ) : null}
             </div>
           </div>
 
