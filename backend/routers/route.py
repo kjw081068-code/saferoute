@@ -3,7 +3,7 @@ import os
 from typing import List, Optional, Tuple
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from routers.safety import _load_grid
@@ -11,6 +11,7 @@ from routers.safety import _load_grid
 router = APIRouter()
 
 TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
+TMAP_POI_URL = "https://apis.openapi.sk.com/tmap/pois"
 SAMPLE_INTERVAL_M = 100       # 안전점수 샘플링 간격 (미터)
 SAFE_ROUTE_MAX_DIST_M = 1000  # 안전경로 지원 최대 직선거리 (미터)
 WAYPOINT_INTERVAL_M = 200     # 경유지 간격 (미터)
@@ -48,6 +49,17 @@ class RouteResult(BaseModel):
 
 class RouteResponse(BaseModel):
     routes: List[RouteResult]
+
+
+class PoiItem(BaseModel):
+    name: str
+    address: str
+    lat: float
+    lng: float
+
+
+class PoiSearchResponse(BaseModel):
+    results: List[PoiItem]
 
 
 # ── 내부 유틸 함수 ────────────────────────────────────────────────────────────
@@ -410,3 +422,44 @@ def get_safe_route(req: RouteRequest):
         safe_result = _build_route_result("safe", normal_coords, normal_duration_sec)
 
     return RouteResponse(routes=[safe_result, normal_result])
+
+
+@router.get("/search-poi", response_model=PoiSearchResponse)
+def search_poi(
+    q: str = Query(..., description="검색어"),
+    count: int = Query(default=5),
+    center_lat: Optional[float] = Query(default=None, description="지도 중심 위도"),
+    center_lng: Optional[float] = Query(default=None, description="지도 중심 경도"),
+):
+    """장소명·주소·건물명으로 TMAP POI를 검색하고 후보 목록을 반환합니다."""
+    tmap_key = (os.getenv("TMAP_APP_KEY") or "").strip()
+    if not tmap_key:
+        raise HTTPException(status_code=500, detail="TMAP_APP_KEY 환경변수가 설정되지 않았습니다.")
+    params: dict = {
+        "version": "1",
+        "searchKeyword": q,
+        "count": count,
+        "appKey": tmap_key,
+    }
+    if center_lat is not None and center_lng is not None:
+        params["centerLat"] = str(center_lat)
+        params["centerLon"] = str(center_lng)
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(TMAP_POI_URL, params=params)
+        resp.raise_for_status()
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        raise HTTPException(status_code=502, detail="TMAP POI 검색 API 호출에 실패했습니다.")
+
+    pois = resp.json().get("searchPoiInfo", {}).get("pois", {}).get("poi", [])
+    results = []
+    for poi in pois:
+        addr_list = poi.get("newAddressList", {}).get("newAddress", [])
+        addr = addr_list[0].get("fullAddressRoad", "") if addr_list else ""
+        try:
+            lat = float(poi.get("frontLat", 0))
+            lng = float(poi.get("frontLon", 0))
+        except (ValueError, TypeError):
+            continue
+        results.append(PoiItem(name=poi.get("name", ""), address=addr, lat=lat, lng=lng))
+    return PoiSearchResponse(results=results)
