@@ -3,6 +3,8 @@ import styles from './App.module.css';
 
 const SILLIM_STATION = { lat: 37.4846, lng: 126.9294 };
 const MAP_ZOOM_LEVEL = 4;
+/** 내 위치로 이동할 때 줌(숫자가 작을수록 확대 — 카카오맵 규칙) */
+const MAP_LOCATION_FOLLOW_LEVEL = 3;
 /** `panBy` 한 번에 이동할 픽셀 (동네 줌 기준) */
 const MAP_PAN_STEP_PX = 120;
 
@@ -661,30 +663,36 @@ function App() {
     setOriginTrackingLoading(false);
   }, []);
 
-  /** 출발 파란 마커 위치·지도 중심만 갱신 (역지오코딩 없음) */
-  const syncOriginPinAndCenter = useCallback((lat: number, lng: number) => {
-    const maps = window.kakao?.maps;
-    const map = mapInstanceRef.current;
-    if (!maps || !map) return;
-    originCoordRef.current = { lat, lng };
-    const latlng = new maps.LatLng(lat, lng);
-    const existing = originMarkerRef.current;
-    if (existing) {
-      existing.setPosition(latlng);
-    } else {
-      const originImage = new maps.MarkerImage(
-        pinSvgDataUrl('#2563eb'),
-        new maps.Size(PIN_W, PIN_H),
-        { offset: new maps.Point(PIN_W / 2, PIN_H) }
-      );
-      originMarkerRef.current = new maps.Marker({
-        position: latlng,
-        map,
-        image: originImage,
-      });
-    }
-    map.setCenter(latlng);
-  }, []);
+  /** 출발 파란 마커 위치·지도 중심 갱신. `level` 주면 `setLevel`도 호출 (내 위치 진입 시) */
+  const syncOriginPinAndCenter = useCallback(
+    (lat: number, lng: number, options?: { level?: number }) => {
+      const maps = window.kakao?.maps;
+      const map = mapInstanceRef.current;
+      if (!maps || !map) return;
+      originCoordRef.current = { lat, lng };
+      const latlng = new maps.LatLng(lat, lng);
+      const existing = originMarkerRef.current;
+      if (existing) {
+        existing.setPosition(latlng);
+      } else {
+        const originImage = new maps.MarkerImage(
+          pinSvgDataUrl('#2563eb'),
+          new maps.Size(PIN_W, PIN_H),
+          { offset: new maps.Point(PIN_W / 2, PIN_H) }
+        );
+        originMarkerRef.current = new maps.Marker({
+          position: latlng,
+          map,
+          image: originImage,
+        });
+      }
+      map.setCenter(latlng);
+      if (options?.level !== undefined) {
+        map.setLevel(options.level);
+      }
+    },
+    []
+  );
 
   const clearOrigin = () => {
     stopOriginTracking();
@@ -1139,7 +1147,7 @@ function App() {
           const loc = locationFromGeocodeResult(result[0]!);
           setOrigin(loc);
           lastOriginReverseGeocodeRef.current = { lat, lng, at: Date.now() };
-          syncOriginPinAndCenter(lat, lng);
+          syncOriginPinAndCenter(lat, lng, { level: MAP_LOCATION_FOLLOW_LEVEL });
         });
       },
       (err) => {
@@ -1199,8 +1207,13 @@ function App() {
       (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        syncOriginPinAndCenter(lat, lng);
-        if (!originTrackingFirstFixRef.current) {
+        const isFirstFix = !originTrackingFirstFixRef.current;
+        syncOriginPinAndCenter(
+          lat,
+          lng,
+          isFirstFix ? { level: MAP_LOCATION_FOLLOW_LEVEL } : undefined
+        );
+        if (isFirstFix) {
           originTrackingFirstFixRef.current = true;
           setOriginTrackingLoading(false);
           setOriginTrackingActive(true);
