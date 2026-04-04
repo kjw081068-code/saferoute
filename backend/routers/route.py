@@ -13,7 +13,7 @@ router = APIRouter()
 TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
 TMAP_POI_URL = "https://apis.openapi.sk.com/tmap/pois"
 SAMPLE_INTERVAL_M = 100       # 안전점수 샘플링 간격 (미터)
-# 직선거리 이하(미터): 안전(경유지)+일반 두 경로 모두 반환. 초과: 안전 경로만 반환.
+# 직선거리 이하(미터): 안전(경유지)+일반 두 경로 모두 반환. 초과: 일반 경로만 반환.
 BOTH_ROUTES_MAX_DIST_M = 3000
 WAYPOINT_INTERVAL_M = 200     # 경유지 간격 (미터)
 PERP_OFFSET_M = 50            # 수직 이동 거리 (미터)
@@ -412,13 +412,11 @@ def get_safe_route(req: RouteRequest):
         req.origin_lat, req.origin_lng, req.dest_lat, req.dest_lng
     )
 
-    # ── 3km 초과: 안전 경로(경유지)만. 실패 시 직접 도보 1회 결과를 safe 타입으로 ──
+    # ── 3km 초과: 일반 경로(직접 도보)만 ──
     if straight_dist > BOTH_ROUTES_MAX_DIST_M:
-        safe_only = _build_safe_route(req, headers)
-        if safe_only is None:
-            coords, duration_sec = _fetch_direct_pedestrian(req, headers)
-            safe_only = _build_route_result("safe", coords, duration_sec)
-        return RouteResponse(routes=[safe_only])
+        normal_coords, normal_duration_sec = _fetch_direct_pedestrian(req, headers)
+        normal_only = _build_route_result("normal", normal_coords, normal_duration_sec)
+        return RouteResponse(routes=[normal_only])
 
     # ── 3km 이하: 일반 + 안전 둘 다 (안전 생성 실패 시 일반 좌표로 safe 대체) ──
     normal_coords, normal_duration_sec = _fetch_direct_pedestrian(req, headers)

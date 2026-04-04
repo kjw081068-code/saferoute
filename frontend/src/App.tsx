@@ -1421,6 +1421,7 @@ function App() {
           >
             {routeFetchLoading ? '경로 찾는 중…' : '안전 경로 찾기'}
           </button>
+          <p className={styles.safeRouteFootnote}>*안전경로는 3km까지만 표시됩니다.</p>
         </div>
 
         <section className={styles.safetyPanel} aria-live="polite" aria-label="지도 클릭 지점 안전도">
