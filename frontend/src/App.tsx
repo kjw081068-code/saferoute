@@ -1146,6 +1146,8 @@ function App() {
           setOriginGeolocationError(null);
           const loc = locationFromGeocodeResult(result[0]!);
           setOrigin(loc);
+          setOriginQuery(formatLocationLabel(loc));
+          setOriginSuggestions([]);
           lastOriginReverseGeocodeRef.current = { lat, lng, at: Date.now() };
           syncOriginPinAndCenter(lat, lng, { level: MAP_LOCATION_FOLLOW_LEVEL });
         });
@@ -1199,7 +1201,10 @@ function App() {
       geocoder.coord2Address(lng, lat, (result, status) => {
         if (status !== maps.services.Status.OK || !result?.length) return;
         lastOriginReverseGeocodeRef.current = { lat, lng, at: Date.now() };
-        setOrigin(locationFromGeocodeResult(result[0]!));
+        const loc = locationFromGeocodeResult(result[0]!);
+        setOrigin(loc);
+        setOriginQuery(formatLocationLabel(loc));
+        setOriginSuggestions([]);
       });
     };
 

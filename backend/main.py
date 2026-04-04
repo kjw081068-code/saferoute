@@ -15,7 +15,7 @@ app = FastAPI(title="신림동 안전경로 API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*", "https://saferoute-two.vercel.app"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
