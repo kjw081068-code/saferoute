@@ -7,9 +7,9 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-CSV_PATH = Path(__file__).parents[2] / "data" / "safety_grid.csv"
-CCTV_CSV_PATH = Path(__file__).parents[2] / "data" / "cctv_raw.csv"
-STREETLIGHT_CSV_PATH = Path(__file__).parents[2] / "data" / "streetlight_raw.csv"
+CSV_PATH = Path(__file__).parents[1] / "data" / "safety_grid.csv"
+CCTV_CSV_PATH = Path(__file__).parents[1] / "data" / "cctv_raw.csv"
+STREETLIGHT_CSV_PATH = Path(__file__).parents[1] / "data" / "streetlight_raw.csv"
 
 _grid_df: pd.DataFrame | None = None
 
