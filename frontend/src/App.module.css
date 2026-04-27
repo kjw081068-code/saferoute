@@ -770,6 +770,12 @@
   color: #fff;
 }
 
+.layerToggleBtnPolice {
+  background: rgba(15, 118, 110, 0.85);
+  border-color: #0f766e;
+  color: #fff;
+}
+
 .layerToggleBtnOff {
   background: rgba(40, 40, 40, 0.75);
   border-color: rgba(255, 255, 255, 0.15);

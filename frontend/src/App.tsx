@@ -41,7 +41,7 @@ function clusterCountText(count: number): string {
 }
 
 /** CCTV=파랑, 가로등=주황, 유흥업소=빨강 계열 — 클러스터 원만으로 구분 */
-function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'entertainment' | 'convenience'): Array<Record<string, string>> {
+function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'entertainment' | 'convenience' | 'police'): Array<Record<string, string>> {
   const fills: [string, string, string, string, string] =
     kind === 'cctv'
       ? [
@@ -67,12 +67,20 @@ function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'entertainment' | 'conv
           'rgba(153, 27, 27, 0.95)',
           'rgba(127, 29, 29, 0.96)',
         ]
-      : [
+      : kind === 'convenience'
+      ? [
           'rgba(22, 163, 74, 0.9)',
           'rgba(21, 128, 61, 0.92)',
           'rgba(20, 83, 45, 0.94)',
           'rgba(14, 116, 144, 0.95)',
           'rgba(6, 78, 59, 0.96)',
+        ]
+      : [
+          'rgba(15, 118, 110, 0.9)',
+          'rgba(13, 148, 136, 0.92)',
+          'rgba(17, 94, 89, 0.94)',
+          'rgba(19, 78, 74, 0.95)',
+          'rgba(4, 47, 46, 0.96)',
         ];
   const sizes = [32, 40, 48, 56, 64];
   return sizes.map((px, i) => ({
@@ -337,6 +345,7 @@ type MapPointSafety = {
   light_count: number;
   conv_count: number;
   ent_count: number;
+  police_count: number;
 };
 
 /** 백엔드 grade → UI 색상 구분 */
@@ -415,14 +424,17 @@ function App() {
   const lightClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const entClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const convClustererRef = useRef<KakaoMarkerClusterer | null>(null);
+  const policeClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const cctvMarkersRef = useRef<KakaoMarker[]>([]);
   const lightMarkersRef = useRef<KakaoMarker[]>([]);
   const entMarkersRef = useRef<KakaoMarker[]>([]);
   const convMarkersRef = useRef<KakaoMarker[]>([]);
+  const policeMarkersRef = useRef<KakaoMarker[]>([]);
   const showCctvRef = useRef(false);
   const showStreetlightRef = useRef(false);
   const showEntRef = useRef(false);
   const showConvRef = useRef(false);
+  const showPoliceRef = useRef(false);
   const geocoderRef = useRef<Geocoder | null>(null);
   const originCoordRef = useRef<{ lat: number; lng: number } | null>(null);
   /** `watchPosition` 반환 id — 언마운트·중지 시 clearWatch */
@@ -439,6 +451,7 @@ function App() {
   const [showStreetlight, setShowStreetlight] = useState(false);
   const [showEnt, setShowEnt] = useState(false);
   const [showConv, setShowConv] = useState(false);
+  const [showPolice, setShowPolice] = useState(false);
   const [origin, setOrigin] = useState<LocationField>(emptyLocation);
   const [destination, setDestination] = useState<LocationField>(emptyLocation);
   const [originQuery, setOriginQuery] = useState('');
@@ -527,6 +540,7 @@ function App() {
   showStreetlightRef.current = showStreetlight;
   showEntRef.current = showEnt;
   showConvRef.current = showConv;
+  showPoliceRef.current = showPolice;
 
   safetyFetchHandlerRef.current = (lat: number, lng: number) => {
     void (async () => {
@@ -541,7 +555,7 @@ function App() {
         if (!res.ok) {
           throw new Error(`서버 응답 ${res.status}`);
         }
-        const data = (await res.json()) as { score?: unknown; grade?: unknown; cctv_count?: unknown; light_count?: unknown; conv_count?: unknown; ent_count?: unknown };
+        const data = (await res.json()) as { score?: unknown; grade?: unknown; cctv_count?: unknown; light_count?: unknown; conv_count?: unknown; ent_count?: unknown; police_count?: unknown };
         const score = Number(data.score);
         const grade = typeof data.grade === 'string' ? data.grade.trim() : '';
         if (!Number.isFinite(score) || !grade) {
@@ -553,6 +567,7 @@ function App() {
           light_count: Number(data.light_count ?? 0),
           conv_count: Number(data.conv_count ?? 0),
           ent_count: Number(data.ent_count ?? 0),
+          police_count: Number(data.police_count ?? 0),
         });
       } catch (e) {
         setMapPointSafety(null);
@@ -925,6 +940,11 @@ function App() {
           new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
           { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
         );
+        const policeIcon = new kakao.maps.MarkerImage(
+          `${base}/markers/police-dot.svg`,
+          new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+          { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
+        );
 
         void (async () => {
           try {
@@ -936,6 +956,7 @@ function App() {
               streetlight: { lat: number; lng: number }[];
               entertainment: { lat: number; lng: number }[];
               convenience: { lat: number; lng: number }[];
+              police: { lat: number; lng: number }[];
             };
 
             const ClustererCtor = kakao.maps.MarkerClusterer;
@@ -977,6 +998,15 @@ function App() {
             );
             convMarkersRef.current = convMarkers;
 
+            const policeMarkers = (data.police ?? []).map(
+              (pt) =>
+                new kakao.maps.Marker({
+                  position: new kakao.maps.LatLng(pt.lat, pt.lng),
+                  image: policeIcon,
+                })
+            );
+            policeMarkersRef.current = policeMarkers;
+
             const mapNow = mapInstanceRef.current;
             /** 1 = 모든 줌에서 클러스터 활성(레벨↑ 축소할 때만 켜지던 현상 제거) */
             const clusterMinLevel = 1;
@@ -1012,10 +1042,19 @@ function App() {
               texts: clusterCountText,
               styles: clusterStylesFor('convenience'),
             });
+            const policeCluster = new ClustererCtor({
+              map: null,
+              averageCenter: true,
+              minLevel: clusterMinLevel,
+              calculator: CLUSTER_CALCULATOR,
+              texts: clusterCountText,
+              styles: clusterStylesFor('police'),
+            });
             cctvClustererRef.current = cctvCluster;
             lightClustererRef.current = lightCluster;
             entClustererRef.current = entCluster;
             convClustererRef.current = convCluster;
+            policeClustererRef.current = policeCluster;
 
             if (mapNow) {
               if (showCctvRef.current) {
@@ -1033,6 +1072,10 @@ function App() {
               if (showConvRef.current) {
                 convCluster.addMarkers(convMarkers);
                 convCluster.setMap(mapNow);
+              }
+              if (showPoliceRef.current) {
+                policeCluster.addMarkers(policeMarkers);
+                policeCluster.setMap(mapNow);
               }
             }
           } catch (_) {
@@ -1112,6 +1155,18 @@ function App() {
     } else {
       convMarkersRef.current.forEach((m) => m.setMap(null));
       convClustererRef.current?.clear();
+    }
+  };
+
+  const togglePolice = () => {
+    const next = !showPolice;
+    setShowPolice(next);
+    if (next) {
+      policeClustererRef.current?.addMarkers(policeMarkersRef.current);
+      policeClustererRef.current?.setMap(mapInstanceRef.current);
+    } else {
+      policeMarkersRef.current.forEach((m) => m.setMap(null));
+      policeClustererRef.current?.clear();
     }
   };
 
@@ -1462,6 +1517,9 @@ function App() {
               <div className={styles.safetyDetailRow}>
                 <span>유흥업소</span><span>{mapPointSafety.ent_count}개</span>
               </div>
+              <div className={styles.safetyDetailRow}>
+                <span>경찰서/지구대</span><span>{mapPointSafety.police_count}개</span>
+              </div>
               <div className={styles.safetyCoords}>
                 {mapPointSafety.lat.toFixed(5)}, {mapPointSafety.lng.toFixed(5)}
               </div>
@@ -1567,6 +1625,14 @@ function App() {
               aria-pressed={showConv}
             >
               🏪 편의점
+            </button>
+            <button
+              type="button"
+              className={`${styles.layerToggleBtn} ${showPolice ? styles.layerToggleBtnPolice : styles.layerToggleBtnOff}`}
+              onClick={togglePolice}
+              aria-pressed={showPolice}
+            >
+              🚔 경찰서
             </button>
           </div>
           <div className={styles.mapOverlay} aria-hidden>

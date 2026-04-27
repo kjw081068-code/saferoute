@@ -6,10 +6,11 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 # ── 1. 데이터 로드 ────────────────────────────────────────────────
-cctv = pd.read_csv("cctv_raw.csv", encoding="cp949")
-sl   = pd.read_csv("streetlight_gwanak.csv", encoding="utf-8-sig")
-conv = pd.read_csv("convenience_gwanak.csv", encoding="utf-8-sig")
-ent  = pd.read_csv("entertainment_gwanak.csv", encoding="utf-8-sig")
+cctv   = pd.read_csv("cctv_raw.csv", encoding="cp949")
+sl     = pd.read_csv("streetlight_gwanak.csv", encoding="utf-8-sig")
+conv   = pd.read_csv("convenience_gwanak.csv", encoding="utf-8-sig")
+ent    = pd.read_csv("entertainment_gwanak.csv", encoding="utf-8-sig")
+police = pd.read_csv("police_gwanak.csv", encoding="utf-8-sig")
 
 cctv = cctv.rename(columns={"위도": "lat", "경도": "lng", "CCTV 수량": "qty"})
 sl   = sl.rename(columns={"위도": "lat", "경도": "lng"})
@@ -83,9 +84,18 @@ for i, idxs in enumerate(ent_tree.query_ball_point(grid_xy, r=100)):
     ent_counts[i] = min(len(idxs), 3)
     ent_deducts[i] = ent_counts[i] * 3  # 3점/개, 최대 9점 감점
 
+# 경찰서/지구대/파출소: 반경 300m, 최대 1개 캡, 가산
+police["lat"] = police["lat"].astype(float)
+police["lng"] = police["lng"].astype(float)
+px, py = to_xy(police["lat"].values, police["lng"].values)
+police_tree = cKDTree(np.column_stack([px, py]))
+police_counts = np.zeros(len(grid_xy), dtype=int)
+for i, idxs in enumerate(police_tree.query_ball_point(grid_xy, r=300)):
+    police_counts[i] = min(len(idxs), 1)
+
 # ── 6. 안전점수 계산 ─────────────────────────────────────────────
 # 기본 40점 + 가산점 - 감점 (최소 10점 보장)
-scores = np.maximum(40 + cctv_scores + light_scores + conv_scores - ent_deducts, 10)
+scores = np.maximum(40 + cctv_scores + light_scores + conv_scores + police_counts * 10 - ent_deducts, 10)
 
 # 등급: 상대평가 (하위 30% → 위험, 중위 40% → 보통, 상위 30% → 안전)
 n     = len(scores)
@@ -95,14 +105,15 @@ grades = np.where(ranks < n * 0.30, "위험",
 
 # ── 7. 결과 저장 ─────────────────────────────────────────────────
 result = pd.DataFrame({
-    "위도":          grid_lats,
-    "경도":          grid_lngs,
-    "cctv_count":    (cctv_scores / 5).astype(int),
-    "light_count":   (light_scores / 5).astype(int),
-    "conv_count":    (conv_scores / 5).astype(int),
-    "ent_count":     ent_counts,
-    "score":         scores.round(2),
-    "grade":         grades,
+    "위도":           grid_lats,
+    "경도":           grid_lngs,
+    "cctv_count":     (cctv_scores / 5).astype(int),
+    "light_count":    (light_scores / 5).astype(int),
+    "conv_count":     (conv_scores / 5).astype(int),
+    "ent_count":      ent_counts,
+    "police_count":   police_counts,
+    "score":          scores.round(2),
+    "grade":          grades,
 })
 
 result.to_csv("safety_grid.csv", index=False, encoding="utf-8-sig")
