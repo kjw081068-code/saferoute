@@ -164,100 +164,22 @@ const ROUTE_STROKE_WEIGHT = 6;
 /** 일반 경로(백엔드 type normal) 단색 */
 const NORMAL_ROUTE_BLUE = '#2563eb';
 
-/** 구간 등급별 선 색 (백엔드 segments.grade) */
-function segmentGradeColor(grade: string): string {
-  const g = grade.trim();
-  if (g === '안전') return '#4ade80';
-  if (g === '보통') return '#facc15';
-  if (g === '위험') return '#f87171';
-  if (g.includes('주의')) return '#facc15';
-  return '#facc15';
+/** avg_score 점수 기준 경로 색상 (패널 색상과 동일 기준) */
+function scoreToRouteColor(score: number): string {
+  if (score >= 80) return '#4ade80'; // 초록
+  if (score >= 50) return '#facc15'; // 노랑
+  return '#f87171';                  // 빨강
 }
 
-/** 위도·경도(도) 기준 거리 제곱 — 가까운 꼭짓점 찾기용 */
-function squaredDegDist(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const dLat = lat1 - lat2;
-  const dLng = lng1 - lng2;
-  return dLat * dLat + dLng * dLng;
-}
-
-/** points[fromIdx]부터 끝까지 중 (lat,lng)에 가장 가까운 꼭짓점 인덱스 (경로 진행 방향 유지) */
-function closestPointIndexFrom(
-  points: number[][],
-  lat: number,
-  lng: number,
-  fromIdx: number
-): number {
-  let best = fromIdx;
-  let bestD = Infinity;
-  for (let i = fromIdx; i < points.length; i++) {
-    const d = squaredDegDist(points[i]![0], points[i]![1], lat, lng);
-    if (d < bestD) {
-      bestD = d;
-      best = i;
-    }
-  }
-  return best;
-}
-
-/**
- * segments 샘플 좌표를 points 폴리라인에 투영해 구간 경계를 잡고,
- * 구간마다 grade 색의 Polyline을 이어 그립니다.
- */
-function buildPolylinesFromSegments(
-  maps: KakaoGlobal['maps'],
-  points: number[][],
-  segments: { lat: number; lng: number; grade: string }[]
-): KakaoPolyline[] {
-  if (points.length < 2 || segments.length === 0) return [];
-
-  const n = segments.length;
-  /** boundaries[j] = segment[j] 구간 시작 꼭짓점 인덱스, boundaries[n] = 끝 */
-  const boundaries: number[] = new Array(n + 1);
-  boundaries[0] = 0;
-  for (let j = 1; j < n; j++) {
-    const idx = closestPointIndexFrom(points, segments[j]!.lat, segments[j]!.lng, boundaries[j - 1]!);
-    boundaries[j] = Math.max(idx, boundaries[j - 1]!);
-  }
-  boundaries[n] = points.length - 1;
-
-  const polylines: KakaoPolyline[] = [];
-  for (let j = 0; j < n; j++) {
-    let start = boundaries[j]!;
-    let end = boundaries[j + 1]!;
-    if (end < start) end = start;
-    if (start === end) {
-      if (end < points.length - 1) end += 1;
-      else if (start > 0) start -= 1;
-    }
-    if (start > end) [start, end] = [end, start];
-
-    const slice = points.slice(start, end + 1);
-    if (slice.length < 2) continue;
-
-    const path = slice.map(([lat, lng]) => new maps.LatLng(lat, lng));
-    polylines.push(
-      new maps.Polyline({
-        path,
-        strokeWeight: ROUTE_STROKE_WEIGHT,
-        strokeColor: segmentGradeColor(segments[j]!.grade),
-        strokeOpacity: 0.95,
-        strokeStyle: 'solid',
-      })
-    );
-  }
-  return polylines;
-}
-
-/** 일반 경로: points 전체를 파란 Polyline 한 줄로 */
-function buildNormalRouteBluePolylines(maps: KakaoGlobal['maps'], points: number[][]): KakaoPolyline[] {
+/** 경로 전체를 단일 색상 Polyline 한 줄로 */
+function buildSingleColorPolylines(maps: KakaoGlobal['maps'], points: number[][], color: string = NORMAL_ROUTE_BLUE): KakaoPolyline[] {
   if (points.length < 2) return [];
   const path = points.map(([lat, lng]) => new maps.LatLng(lat, lng));
   return [
     new maps.Polyline({
       path,
       strokeWeight: ROUTE_STROKE_WEIGHT,
-      strokeColor: NORMAL_ROUTE_BLUE,
+      strokeColor: color,
       strokeOpacity: 0.92,
       strokeStyle: 'solid',
     }),
@@ -403,14 +325,15 @@ function disposeRoutePolylines(mapRef: MutableRefObject<Partial<Record<RouteId, 
   mapRef.current = {};
 }
 
-/** 안전·일반 경로 폴리라인을 동시에 표시 (일반 파랑을 먼저 깔고 안전 색상을 위에) */
-function showAllRoutePolylinesOnMap(
+/** 선택된 경로만 표시, 나머지는 숨김 */
+function showSelectedRoutePolylineOnMap(
   map: KakaoMap | null,
-  polyRef: MutableRefObject<Partial<Record<RouteId, KakaoPolyline[]>>>
+  polyRef: MutableRefObject<Partial<Record<RouteId, KakaoPolyline[]>>>,
+  selectedId: RouteId
 ) {
   if (!map) return;
   (['normal', 'safe'] as const).forEach((id) => {
-    polyRef.current[id]?.forEach((p) => p.setMap(map));
+    polyRef.current[id]?.forEach((p) => p.setMap(id === selectedId ? map : null));
   });
 }
 
@@ -647,9 +570,9 @@ function App() {
         for (const r of list) {
           const id = r.type as RouteId;
           if (id === 'normal') {
-            nextPolylines[id] = buildNormalRouteBluePolylines(kakaoMaps, r.points);
+            nextPolylines[id] = buildSingleColorPolylines(kakaoMaps, r.points, NORMAL_ROUTE_BLUE);
           } else {
-            nextPolylines[id] = buildPolylinesFromSegments(kakaoMaps, r.points, r.segments);
+            nextPolylines[id] = buildSingleColorPolylines(kakaoMaps, r.points, scoreToRouteColor(r.avg_score));
           }
         }
         routePolylinesRef.current = nextPolylines;
@@ -658,7 +581,7 @@ function App() {
         const initialId = (hasSafe ? 'safe' : (list[0]!.type as RouteId)) as RouteId;
         setRouteApiResults(list);
         setSelectedRouteId(initialId);
-        showAllRoutePolylinesOnMap(map, routePolylinesRef);
+        showSelectedRoutePolylineOnMap(map, routePolylinesRef, initialId);
         fitMapToRoutePoints(map, kakaoMaps, list);
       } catch (e) {
         disposeRoutePolylines(routePolylinesRef);
@@ -849,6 +772,11 @@ function App() {
       }
     })();
   }, [routeApiResults, selectedRouteId]);
+
+  // 탭 전환 시 선택된 경로만 지도에 표시
+  useEffect(() => {
+    showSelectedRoutePolylineOnMap(mapInstanceRef.current, routePolylinesRef, selectedRouteId);
+  }, [selectedRouteId]);
 
   useEffect(
     () => () => {

@@ -51,20 +51,20 @@ print(f"격자 수: {len(grid_lats)}개 ({len(lat_centers)} × {len(lng_centers)
 gx, gy = to_xy(grid_lats, grid_lngs)
 grid_xy = np.column_stack([gx, gy])
 
-# CCTV: 반경 100m, qty 합산, 최대 5대 캡
+# CCTV: 반경 100m, qty 합산, 최대 4대 캡
 cx, cy = to_xy(cctv["lat"].values, cctv["lng"].values)
 cctv_tree = cKDTree(np.column_stack([cx, cy]))
 cctv_scores = np.zeros(len(grid_xy))
 for i, idxs in enumerate(cctv_tree.query_ball_point(grid_xy, r=100)):
     raw = cctv["qty"].iloc[idxs].sum() if idxs else 0
-    cctv_scores[i] = min(raw, 5) * 5  # 5점/대, 최대 25점
+    cctv_scores[i] = min(raw, 4) * 5  # 5점/대, 최대 20점
 
-# 가로등: 반경 80m, 최대 4개 캡
+# 가로등: 반경 80m, 최대 3개 캡
 lx, ly = to_xy(sl["lat"].values, sl["lng"].values)
 sl_tree = cKDTree(np.column_stack([lx, ly]))
 light_scores = np.zeros(len(grid_xy))
 for i, idxs in enumerate(sl_tree.query_ball_point(grid_xy, r=80)):
-    light_scores[i] = min(len(idxs), 4) * 5  # 5점/개, 최대 20점
+    light_scores[i] = min(len(idxs), 3) * 5  # 5점/개, 최대 15점
 
 # 편의점: 반경 100m, 최대 2개 캡
 vx, vy = to_xy(conv["lat"].values, conv["lng"].values)
@@ -95,7 +95,7 @@ for i, idxs in enumerate(police_tree.query_ball_point(grid_xy, r=300)):
 
 # ── 6. 안전점수 계산 ─────────────────────────────────────────────
 # 기본 40점 + 가산점 - 감점 (최소 10점 보장)
-scores = np.maximum(40 + cctv_scores + light_scores + conv_scores + police_counts * 10 - ent_deducts, 10)
+scores = np.minimum(np.maximum(40 + cctv_scores + light_scores + conv_scores + police_counts * 10 - ent_deducts, 10), 100)
 
 # 등급: 상대평가 (하위 30% → 위험, 중위 40% → 보통, 상위 30% → 안전)
 n     = len(scores)
