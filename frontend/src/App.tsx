@@ -479,6 +479,8 @@ function App() {
   const [originGeolocationError, setOriginGeolocationError] = useState<string | null>(null);
   const [originTrackingActive, setOriginTrackingActive] = useState(false);
   const [originTrackingLoading, setOriginTrackingLoading] = useState(false);
+  const [aiDescription, setAiDescription] = useState<string | null>(null);
+  const [aiDescriptionLoading, setAiDescriptionLoading] = useState(false);
 
   const safetyFetchHandlerRef = useRef<(lat: number, lng: number) => void>(() => {});
 
@@ -813,6 +815,40 @@ function App() {
     const t = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(t);
   }, []);
+
+  // 선택된 경로가 바뀌면 Gemini 안전 안내 메시지 요청
+  useEffect(() => {
+    if (!routeApiResults) {
+      setAiDescription(null);
+      return;
+    }
+    const selected = routeApiResults.find((r) => r.type === selectedRouteId) ?? routeApiResults[0];
+    if (!selected) return;
+
+    setAiDescriptionLoading(true);
+    setAiDescription(null);
+
+    void (async () => {
+      try {
+        const res = await fetch(`${SAFETY_API_BASE}/api/route-description`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            segments: selected.segments,
+            avg_score: selected.avg_score,
+            grade: selected.grade,
+          }),
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { description?: string };
+        setAiDescription(data.description ?? null);
+      } catch {
+        // 실패 시 조용히 무시
+      } finally {
+        setAiDescriptionLoading(false);
+      }
+    })();
+  }, [routeApiResults, selectedRouteId]);
 
   useEffect(
     () => () => {
@@ -1571,19 +1607,29 @@ function App() {
                   );
                 })}
               </div>
-
-              {selectedRoute && (
-                <div className={styles.riskPanel}>
-                  <div className={styles.riskPanelLabel}>선택 경로 · 위험 구간 안내</div>
-                  <p className={styles.riskPanelText}>{selectedRoute.riskNote}</p>
-                </div>
-              )}
             </>
           )}
         </section>
       </aside>
 
       <main className={styles.mapArea}>
+        {selectedRoute && (
+          <div className={styles.mapBottomLeftStack} aria-live="polite">
+            <section className={styles.aiDescBox} aria-label="AI 안전 안내">
+              <div className={styles.aiDescLabel}>🤖 AI 안전 안내</div>
+              {aiDescriptionLoading ? (
+                <div className={styles.aiDescLoading}>
+                  <span className={styles.geoSpinner} aria-hidden /> 경로 분석 중…
+                </div>
+              ) : aiDescription ? (
+                <p className={styles.aiDescText}>{aiDescription}</p>
+              ) : (
+                <div className={styles.aiDescLoading}>안내 메시지를 불러오지 못했습니다.</div>
+              )}
+            </section>
+          </div>
+        )}
+
         <div className={styles.topRightClock} aria-label="현재 시각">
           <span className={styles.clockIcon} aria-hidden>
             {isNight(now) ? '🌙' : '☀️'}
