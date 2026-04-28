@@ -5,10 +5,14 @@ from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent
+BACKEND = Path(__file__).resolve().parent.parent
+ROOT = BACKEND.parent
 OUT = ROOT / "frontend" / "public" / "data" / "map-points.json"
-CCTV_CSV = ROOT / "data" / "cctv_raw.csv"
-SL_CSV = ROOT / "data" / "streetlight_raw.csv"
+CCTV_CSV = BACKEND / "data" / "cctv_raw.csv"
+SL_CSV = BACKEND / "data" / "streetlight_raw.csv"
+ENT_CSV = BACKEND / "data" / "entertainment_gwanak.csv"
+CONV_CSV = BACKEND / "data" / "convenience_gwanak.csv"
+POLICE_CSV = BACKEND / "data" / "police_gwanak.csv"
 
 
 def main() -> None:
@@ -26,14 +30,24 @@ def main() -> None:
         & (sl_df["경도"] > 126.0)
         & (sl_df["경도"] < 128.0)
     ]
+    ent_df = pd.read_csv(ENT_CSV, encoding="utf-8-sig")
+    conv_df = pd.read_csv(CONV_CSV, encoding="utf-8-sig")
+    police_df = pd.read_csv(POLICE_CSV, encoding="utf-8-sig")
 
     out = {
         "cctv": [{"lat": float(r["위도"]), "lng": float(r["경도"])} for _, r in cctv_df.iterrows()],
         "streetlight": [{"lat": float(r["위도"]), "lng": float(r["경도"])} for _, r in sl_df.iterrows()],
+        "entertainment": [{"lat": float(r["lat"]), "lng": float(r["lng"])} for _, r in ent_df.iterrows()],
+        "convenience": [{"lat": float(r["lat"]), "lng": float(r["lng"])} for _, r in conv_df.iterrows()],
+        "police": [{"lat": float(r["lat"]), "lng": float(r["lng"])} for _, r in police_df.iterrows()],
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
-    print(f"저장: {OUT} (CCTV {len(out['cctv'])}, 가로등 {len(out['streetlight'])})")
+    print(
+        f"저장: {OUT} "
+        f"(CCTV {len(out['cctv'])}, 가로등 {len(out['streetlight'])}, "
+        f"유흥업소 {len(out['entertainment'])}, 편의점 {len(out['convenience'])}, 경찰서 {len(out['police'])})"
+    )
 
 
 if __name__ == "__main__":
