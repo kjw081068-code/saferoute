@@ -7,7 +7,7 @@ from scipy.spatial import cKDTree
 
 # ── 1. 데이터 로드 ────────────────────────────────────────────────
 cctv = pd.read_csv("cctv_raw.csv", encoding="cp949")
-sl   = pd.read_csv("streetlight_gwanak.csv", encoding="utf-8-sig")
+sl   = pd.read_csv("streetlight_raw.csv", encoding="cp949")
 conv = pd.read_csv("convenience_gwanak.csv", encoding="utf-8-sig")
 ent  = pd.read_csv("entertainment_gwanak.csv", encoding="utf-8-sig")
 
