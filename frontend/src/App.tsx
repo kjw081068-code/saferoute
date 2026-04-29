@@ -105,6 +105,12 @@ function pinSvgDataUrl(fill: string): string {
 
 type RouteId = 'safe' | 'normal';
 
+type AiDescription = {
+  safe_points: string[];
+  warning_points: string[];
+  ai_summary: string;
+};
+
 type MapPickTarget = 'origin' | 'destination';
 
 type RouteCardData = {
@@ -460,7 +466,7 @@ function App() {
   const [originGeolocationError, setOriginGeolocationError] = useState<string | null>(null);
   const [originTrackingActive, setOriginTrackingActive] = useState(false);
   const [originTrackingLoading, setOriginTrackingLoading] = useState(false);
-  const [aiDescription, setAiDescription] = useState<string | null>(null);
+  const [aiDescription, setAiDescription] = useState<AiDescription | null>(null);
   const [aiDescriptionLoading, setAiDescriptionLoading] = useState(false);
 
   const safetyFetchHandlerRef = useRef<(lat: number, lng: number) => void>(() => {});
@@ -822,8 +828,12 @@ function App() {
           }),
         });
         if (!res.ok) return;
-        const data = (await res.json()) as { description?: string };
-        setAiDescription(data.description ?? null);
+        const data = (await res.json()) as { safe_points?: string[]; warning_points?: string[]; ai_summary?: string };
+        setAiDescription({
+          safe_points: data.safe_points ?? [],
+          warning_points: data.warning_points ?? [],
+          ai_summary: data.ai_summary ?? '',
+        });
       } catch {
         // 실패 시 조용히 무시
       } finally {
@@ -1498,6 +1508,51 @@ function App() {
           <p className={styles.safeRouteFootnote}>*안전경로는 3km까지만 표시됩니다.</p>
         </div>
 
+        <section className={styles.routeSection} aria-label="경로 비교">
+          {!hasSearched ? (
+            <div className={styles.emptyState}>
+              출발지와 도착지를 입력한 뒤
+              <br />
+              「안전 경로 찾기」를 눌러주세요.
+            </div>
+          ) : routeFetchLoading ? (
+            <div className={styles.emptyState}>경로를 불러오는 중입니다…</div>
+          ) : routeFetchError ? (
+            <div className={styles.safetyPanelError}>{routeFetchError}</div>
+          ) : routes.length === 0 ? (
+            <div className={styles.emptyState}>표시할 경로가 없습니다.</div>
+          ) : (
+            <>
+              <div className={styles.routeCards}>
+                {routes.map((r) => {
+                  const selected = r.id === selectedRouteId;
+                  const band = scoreBandClass(r.avg_score);
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      className={`${styles.routeCard} ${selected ? styles.routeCardSelected : ''}`}
+                      onClick={() => setSelectedRouteId(r.id)}
+                      aria-pressed={selected}
+                    >
+                      <div className={styles.routeCardHeader}>
+                        <span className={styles.routeCardTitle}>{r.title}</span>
+                        <span className={`${styles.routeScore} ${styles[`score_${band}`]}`}>
+                          평균 {r.avg_score}점
+                        </span>
+                      </div>
+                      <div className={styles.routeCardMeta}>
+                        <span className={styles.routeGrade}>등급 {r.grade}</span>
+                        <span className={styles.routeTime}>소요 {r.duration}분</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+
         <section className={styles.safetyPanel} aria-live="polite" aria-label="지도 클릭 지점 안전도">
           <div className={styles.safetyPanelTitle}>지도 클릭 지점 안전도</div>
           {safetyLoading && <div className={styles.safetyPanelMuted}>불러오는 중…</div>}
@@ -1548,51 +1603,6 @@ function App() {
             <div className={styles.safetyPanelMuted}>지도를 클릭하면 이 위치의 안전 점수를 불러옵니다.</div>
           )}
         </section>
-
-        <section className={styles.routeSection} aria-label="경로 비교">
-          {!hasSearched ? (
-            <div className={styles.emptyState}>
-              출발지와 도착지를 입력한 뒤
-              <br />
-              「안전 경로 찾기」를 눌러주세요.
-            </div>
-          ) : routeFetchLoading ? (
-            <div className={styles.emptyState}>경로를 불러오는 중입니다…</div>
-          ) : routeFetchError ? (
-            <div className={styles.safetyPanelError}>{routeFetchError}</div>
-          ) : routes.length === 0 ? (
-            <div className={styles.emptyState}>표시할 경로가 없습니다.</div>
-          ) : (
-            <>
-              <div className={styles.routeCards}>
-                {routes.map((r) => {
-                  const selected = r.id === selectedRouteId;
-                  const band = scoreBandClass(r.avg_score);
-                  return (
-                    <button
-                      key={r.id}
-                      type="button"
-                      className={`${styles.routeCard} ${selected ? styles.routeCardSelected : ''}`}
-                      onClick={() => setSelectedRouteId(r.id)}
-                      aria-pressed={selected}
-                    >
-                      <div className={styles.routeCardHeader}>
-                        <span className={styles.routeCardTitle}>{r.title}</span>
-                        <span className={`${styles.routeScore} ${styles[`score_${band}`]}`}>
-                          평균 {r.avg_score}점
-                        </span>
-                      </div>
-                      <div className={styles.routeCardMeta}>
-                        <span className={styles.routeGrade}>등급 {r.grade}</span>
-                        <span className={styles.routeTime}>소요 {r.duration}분</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </section>
       </aside>
 
       <main className={styles.mapArea}>
@@ -1605,7 +1615,32 @@ function App() {
                   <span className={styles.geoSpinner} aria-hidden /> 경로 분석 중…
                 </div>
               ) : aiDescription ? (
-                <p className={styles.aiDescText}>{aiDescription}</p>
+                <div className={styles.aiDescContent}>
+                  {aiDescription.safe_points.length > 0 && (
+                    <div className={styles.aiDescSection}>
+                      <div className={styles.aiDescSectionTitle}>🟢 안전 포인트</div>
+                      <ul className={styles.aiDescList}>
+                        {aiDescription.safe_points.map((pt, i) => (
+                          <li key={i} className={styles.aiDescListItem}>{pt}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {aiDescription.warning_points.length > 0 && (
+                    <div className={styles.aiDescSection}>
+                      <div className={styles.aiDescSectionTitle}>🔴 주의 포인트</div>
+                      <ul className={styles.aiDescList}>
+                        {aiDescription.warning_points.map((pt, i) => (
+                          <li key={i} className={styles.aiDescListItem}>{pt}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <div className={styles.aiDescSummaryBox}>
+                    <span className={styles.aiDescSummaryIcon}>🚨</span>
+                    <p className={styles.aiDescSummaryText}>{aiDescription.ai_summary}</p>
+                  </div>
+                </div>
               ) : (
                 <button className={styles.aiDescBtn} onClick={handleRequestAiDescription}>
                   AI 경로 분석하기

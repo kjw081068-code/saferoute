@@ -1,4 +1,6 @@
 import os
+import re
+import json
 from typing import List
 
 from google import genai
@@ -26,7 +28,9 @@ class RouteDescriptionRequest(BaseModel):
 
 
 class RouteDescriptionResponse(BaseModel):
-    description: str
+    safe_points: List[str]
+    warning_points: List[str]
+    ai_summary: str
 
 
 # ── safety_grid에서 구간별 상세 데이터 조회 ──────────────────────────────────
@@ -77,7 +81,8 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
     safe_segments = [d for d in details if d["grade"] == "안전"]
 
     prompt = f"""당신은 보행자 안전 분석 전문가입니다.
-아래는 신림동 귀갓길 경로의 실제 측정 데이터입니다. 이 수치를 근거로 경로가 왜 안전하거나 위험한지 구체적으로 설명하세요.
+아래 경로 데이터를 분석하여, 반드시 아래 JSON 형식으로만 응답하세요.
+마크다운, 코드블록, 부연 설명, 다른 텍스트는 절대 포함하지 마세요.
 
 [경로 데이터]
 - 전체 구간: {total}개 / 안전 {len(safe_segments)}개 / 보통 {len(normal_segments)}개 / 위험 {len(danger_segments)}개
@@ -88,10 +93,17 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
 {danger_info}
 [작성 규칙]
 - 반드시 실제 수치(CCTV 몇 개, 가로등 몇 개 등)를 인용해서 이유를 설명할 것
-- 안전하면 왜 안전한지, 위험하면 왜 위험한지 구체적 근거를 제시할 것
+- safe_points와 warning_points는 뚜렷한 장·단점이 있을 때만 작성하고, 없으면 빈 배열 []로 둘 것
+- safe_points와 warning_points는 각각 최대 2개까지만 작성할 것
 - 유흥시설이 많으면 야간 주취자 위험도 언급할 것
-- 2~3문장, 마크다운 없이 순수 텍스트로만 작성할 것
-- 보행자에게 실질적으로 도움이 되는 행동 조언으로 마무리할 것"""
+- ai_summary는 데이터를 종합한 2~3문장으로, 보행자에게 실질적인 행동 조언으로 마무리할 것
+
+[응답 JSON 형식 - 이 JSON만 출력, 다른 텍스트 절대 금지]
+{{
+  "safe_points": ["장점 문장 (최대 2개, 없으면 빈 배열)"],
+  "warning_points": ["위험/단점 문장 (최대 2개, 없으면 빈 배열)"],
+  "ai_summary": "종합 의견 및 행동 가이드 (2~3문장)"
+}}"""
 
     return prompt
 
@@ -119,8 +131,17 @@ def get_route_description(req: RouteDescriptionRequest):
             model="gemini-2.5-flash",
             contents=prompt,
         )
-        description = response.text.strip()
+        raw = response.text.strip()
+        # 코드블록(```json ... ```) 제거
+        raw = re.sub(r"```[a-z]*\n?", "", raw).strip().rstrip("`").strip()
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=502, detail=f"AI 응답 파싱 실패: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Gemini API 호출 실패: {str(e)}")
 
-    return RouteDescriptionResponse(description=description)
+    return RouteDescriptionResponse(
+        safe_points=parsed.get("safe_points", []),
+        warning_points=parsed.get("warning_points", []),
+        ai_summary=parsed.get("ai_summary", ""),
+    )

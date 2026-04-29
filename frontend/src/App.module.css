@@ -369,7 +369,7 @@
   border-radius: 14px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.22);
+  background: rgba(0, 0, 0, 0.32);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -458,15 +458,18 @@
 }
 
 .routeSection {
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: clamp(220px, 35vh, 380px);
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .emptyState {
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 120px;
   border-radius: 14px;
   border: 1px dashed rgba(255, 255, 255, 0.18);
@@ -492,7 +495,7 @@
   padding: 14px 14px 12px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.28);
   color: #ffffff;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
@@ -869,5 +872,64 @@
 }
 .aiDescBtn:hover {
   background: rgba(99, 102, 241, 0.4);
+}
+
+/* AI 안내 구조화 UI */
+.aiDescContent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.aiDescSection {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.aiDescSectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.aiDescList {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: disc;
+}
+
+.aiDescListItem {
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.aiDescSummaryBox {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.38);
+}
+
+.aiDescSummaryIcon {
+  font-size: 14px;
+  flex-shrink: 0;
+  line-height: 1.55;
+}
+
+.aiDescSummaryText {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 500;
 }
 
