@@ -99,6 +99,8 @@ declare global {
      * 값이 크면 충분히 축소하기 전까지는 개별 마커에 가깝게 보일 수 있음. 1이면 모든 줌에서 묶음.
      */
     minLevel?: number;
+    /** 클러스터로 묶을 최소 마커 수. 1로 설정하면 단독 마커도 클러스터 스타일로 표시 */
+    minClusterSize?: number;
     /** 클러스터 포함 개수 구간 경계 — 구간 수 = styles 길이 − 1 */
     calculator?: number[];
     /** calculator 구간마다 표시할 문자열(보통 개수). 배열 또는 (count) => string */

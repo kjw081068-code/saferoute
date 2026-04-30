@@ -61,11 +61,11 @@ function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertai
         ]
       : kind === 'safelight'
       ? [
-          'rgba(167, 243, 208, 0.92)',
-          'rgba(52, 211, 153, 0.92)',
-          'rgba(16, 185, 129, 0.94)',
-          'rgba(5, 150, 105, 0.95)',
-          'rgba(4, 120, 87, 0.96)',
+          'rgba(190, 242, 100, 0.92)',
+          'rgba(163, 230, 53, 0.92)',
+          'rgba(132, 204, 22, 0.94)',
+          'rgba(101, 163, 13, 0.95)',
+          'rgba(77, 124, 15, 0.96)',
         ]
       : kind === 'entertainment'
       ? [
@@ -77,18 +77,18 @@ function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertai
         ]
       : kind === 'convenience'
       ? [
-          'rgba(22, 163, 74, 0.9)',
-          'rgba(21, 128, 61, 0.92)',
-          'rgba(20, 83, 45, 0.94)',
-          'rgba(14, 116, 144, 0.95)',
-          'rgba(6, 78, 59, 0.96)',
+          'rgba(216, 180, 254, 0.92)',
+          'rgba(192, 132, 252, 0.92)',
+          'rgba(147, 51, 234, 0.94)',
+          'rgba(126, 34, 206, 0.95)',
+          'rgba(107, 33, 168, 0.96)',
         ]
       : [
-          'rgba(15, 118, 110, 0.9)',
-          'rgba(13, 148, 136, 0.92)',
-          'rgba(17, 94, 89, 0.94)',
-          'rgba(19, 78, 74, 0.95)',
-          'rgba(4, 47, 46, 0.96)',
+          'rgba(103, 232, 249, 0.92)',
+          'rgba(34, 211, 238, 0.92)',
+          'rgba(6, 182, 212, 0.94)',
+          'rgba(8, 145, 178, 0.95)',
+          'rgba(14, 116, 144, 0.96)',
         ];
   const sizes = [32, 40, 48, 56, 64];
   return sizes.map((px, i) => ({
@@ -1071,6 +1071,7 @@ function App() {
               map: null,
               averageCenter: true,
               minLevel: clusterMinLevel,
+              minClusterSize: 1,
               calculator: CLUSTER_CALCULATOR,
               texts: clusterCountText,
               styles: clusterStylesFor('cctv'),
@@ -1079,6 +1080,7 @@ function App() {
               map: null,
               averageCenter: true,
               minLevel: clusterMinLevel,
+              minClusterSize: 1,
               calculator: CLUSTER_CALCULATOR,
               texts: clusterCountText,
               styles: clusterStylesFor('streetlight'),
@@ -1087,6 +1089,7 @@ function App() {
               map: null,
               averageCenter: true,
               minLevel: clusterMinLevel,
+              minClusterSize: 1,
               calculator: CLUSTER_CALCULATOR,
               texts: clusterCountText,
               styles: clusterStylesFor('safelight'),
@@ -1095,6 +1098,7 @@ function App() {
               map: null,
               averageCenter: true,
               minLevel: clusterMinLevel,
+              minClusterSize: 1,
               calculator: CLUSTER_CALCULATOR,
               texts: clusterCountText,
               styles: clusterStylesFor('entertainment'),
@@ -1103,6 +1107,7 @@ function App() {
               map: null,
               averageCenter: true,
               minLevel: clusterMinLevel,
+              minClusterSize: 1,
               calculator: CLUSTER_CALCULATOR,
               texts: clusterCountText,
               styles: clusterStylesFor('convenience'),
@@ -1111,6 +1116,7 @@ function App() {
               map: null,
               averageCenter: true,
               minLevel: clusterMinLevel,
+              minClusterSize: 1,
               calculator: CLUSTER_CALCULATOR,
               texts: clusterCountText,
               styles: clusterStylesFor('police'),
@@ -1167,11 +1173,13 @@ function App() {
       safelightClustererRef.current?.setMap(null);
       entClustererRef.current?.setMap(null);
       convClustererRef.current?.setMap(null);
+      policeClustererRef.current?.setMap(null);
       cctvClustererRef.current = null;
       lightClustererRef.current = null;
       safelightClustererRef.current = null;
       entClustererRef.current = null;
       convClustererRef.current = null;
+      policeClustererRef.current = null;
       if (el) {
         el.innerHTML = '';
       }
