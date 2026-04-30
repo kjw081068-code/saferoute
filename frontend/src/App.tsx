@@ -1395,7 +1395,7 @@ function App() {
     <div className={styles.app}>
       <aside className={styles.sidebar}>
         <header className={styles.brandBlock}>
-          <div className={styles.logoMark} aria-hidden />
+          <img src="/logo.jpg" alt="로고" className={styles.logoMark} />
           <div>
             <h1 className={styles.appName}>보통의하루</h1>
             <p className={styles.appTagline}>안심 귀갓길 내비게이터</p>
