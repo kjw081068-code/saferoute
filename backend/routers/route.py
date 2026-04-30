@@ -15,7 +15,7 @@ TMAP_POI_URL = "https://apis.openapi.sk.com/tmap/pois"
 SAMPLE_INTERVAL_M = 100       # 안전점수 샘플링 간격 (미터)
 # 직선거리 이하(미터): 안전(경유지)+일반 두 경로 모두 반환. 초과: 일반 경로만 반환.
 BOTH_ROUTES_MAX_DIST_M = 3000
-WAYPOINT_INTERVAL_M = 200     # 경유지 간격 (미터)
+WAYPOINT_INTERVAL_M = 100     # 경유지 간격 (미터)
 PERP_OFFSET_M = 50            # 수직 이동 거리 (미터)
 
 # 서울 기준 좌표-거리 변환 상수
@@ -206,10 +206,10 @@ def _call_tmap(headers: dict, body: dict) -> Optional[dict]:
 def _interpolate_midpoints(
     lat1: float, lng1: float, lat2: float, lng2: float
 ) -> List[Tuple[float, float]]:
-    """출발-도착 직선을 200m 간격으로 선형 보간하여 중간 지점 리스트를 반환합니다.
+    """출발-도착 직선을 100m 간격으로 선형 보간하여 중간 지점 리스트를 반환합니다.
 
     출발/도착 지점은 포함되지 않습니다.
-    예: 1000m → n_segments=5 → 중간 지점 4개 (t=0.2, 0.4, 0.6, 0.8)
+    예: 1000m → n_segments=10 → 중간 지점 9개 (t=0.1, 0.2, ..., 0.9)
     n_segments가 1 이하이면 빈 리스트 반환.
     """
     total_m = _straight_distance_m(lat1, lng1, lat2, lng2)

@@ -92,17 +92,21 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
 - 경로 내 편의점: {total_conv}개, 유흥시설: {total_ent}개
 {danger_info}
 [작성 규칙]
-- 반드시 실제 수치(CCTV 몇 개, 가로등 몇 개 등)를 인용해서 이유를 설명할 것
+- safe_points·warning_points: 반드시 실제 수치(CCTV 몇 개, 가로등 몇 개 등)를 인용해서 이유를 설명할 것
 - safe_points와 warning_points는 뚜렷한 장·단점이 있을 때만 작성하고, 없으면 빈 배열 []로 둘 것
 - safe_points와 warning_points는 각각 최대 2개까지만 작성할 것
 - 유흥시설이 많으면 야간 주취자 위험도 언급할 것
-- ai_summary는 데이터를 종합한 2~3문장으로, 보행자에게 실질적인 행동 조언으로 마무리할 것
+- ai_summary 규칙:
+  1. safe_points·warning_points에서 이미 언급한 내용은 절대 반복하지 말 것
+  2. 점수·등급·구간 수·CCTV 수·가로등 수·편의점 수 등 수치는 일절 포함하지 말 것 (UI에서 별도 표시됨)
+  3. 이 경로를 실제로 걷는 보행자에게 필요한 핵심 행동 조언만 작성할 것
+  4. 2문장 이내, 절대 초과 금지
 
 [응답 JSON 형식 - 이 JSON만 출력, 다른 텍스트 절대 금지]
 {{
   "safe_points": ["장점 문장 (최대 2개, 없으면 빈 배열)"],
   "warning_points": ["위험/단점 문장 (최대 2개, 없으면 빈 배열)"],
-  "ai_summary": "종합 의견 및 행동 가이드 (2~3문장)"
+  "ai_summary": "핵심 행동 조언 (2문장 이내, 수치 포함 금지)"
 }}"""
 
     return prompt
