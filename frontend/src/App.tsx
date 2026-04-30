@@ -41,7 +41,7 @@ function clusterCountText(count: number): string {
 }
 
 /** CCTV=파랑, 가로등=주황, 유흥업소=빨강 계열 — 클러스터 원만으로 구분 */
-function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'entertainment' | 'convenience' | 'police'): Array<Record<string, string>> {
+function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertainment' | 'convenience' | 'police'): Array<Record<string, string>> {
   const fills: [string, string, string, string, string] =
     kind === 'cctv'
       ? [
@@ -58,6 +58,14 @@ function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'entertainment' | 'conv
           'rgba(217, 119, 6, 0.94)',
           'rgba(180, 83, 9, 0.95)',
           'rgba(146, 64, 14, 0.96)',
+        ]
+      : kind === 'safelight'
+      ? [
+          'rgba(167, 243, 208, 0.92)',
+          'rgba(52, 211, 153, 0.92)',
+          'rgba(16, 185, 129, 0.94)',
+          'rgba(5, 150, 105, 0.95)',
+          'rgba(4, 120, 87, 0.96)',
         ]
       : kind === 'entertainment'
       ? [
@@ -409,16 +417,19 @@ function App() {
   const mapPickTargetRef = useRef<MapPickTarget | null>(null);
   const cctvClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const lightClustererRef = useRef<KakaoMarkerClusterer | null>(null);
+  const safelightClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const entClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const convClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const policeClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const cctvMarkersRef = useRef<KakaoMarker[]>([]);
   const lightMarkersRef = useRef<KakaoMarker[]>([]);
+  const safelightMarkersRef = useRef<KakaoMarker[]>([]);
   const entMarkersRef = useRef<KakaoMarker[]>([]);
   const convMarkersRef = useRef<KakaoMarker[]>([]);
   const policeMarkersRef = useRef<KakaoMarker[]>([]);
   const showCctvRef = useRef(false);
   const showStreetlightRef = useRef(false);
+  const showSafelightRef = useRef(false);
   const showEntRef = useRef(false);
   const showConvRef = useRef(false);
   const showPoliceRef = useRef(false);
@@ -436,6 +447,7 @@ function App() {
   const [mapPickTarget, setMapPickTarget] = useState<MapPickTarget | null>(null);
   const [showCctv, setShowCctv] = useState(false);
   const [showStreetlight, setShowStreetlight] = useState(false);
+  const [showSafelight, setShowSafelight] = useState(false);
   const [showEnt, setShowEnt] = useState(false);
   const [showConv, setShowConv] = useState(false);
   const [showPolice, setShowPolice] = useState(false);
@@ -527,6 +539,7 @@ function App() {
 
   showCctvRef.current = showCctv;
   showStreetlightRef.current = showStreetlight;
+  showSafelightRef.current = showSafelight;
   showEntRef.current = showEnt;
   showConvRef.current = showConv;
   showPoliceRef.current = showPolice;
@@ -983,6 +996,7 @@ function App() {
             const data = (await res.json()) as {
               cctv: { lat: number; lng: number }[];
               streetlight: { lat: number; lng: number }[];
+              safelight: { lat: number; lng: number }[];
               entertainment: { lat: number; lng: number }[];
               convenience: { lat: number; lng: number }[];
               police: { lat: number; lng: number }[];
@@ -1008,6 +1022,15 @@ function App() {
                 })
             );
             lightMarkersRef.current = lightMarkers;
+
+            const safelightMarkers = (data.safelight ?? []).map(
+              (pt) =>
+                new kakao.maps.Marker({
+                  position: new kakao.maps.LatLng(pt.lat, pt.lng),
+                  image: lightIcon,
+                })
+            );
+            safelightMarkersRef.current = safelightMarkers;
 
             const entMarkers = (data.entertainment ?? []).map(
               (pt) =>
@@ -1055,6 +1078,14 @@ function App() {
               texts: clusterCountText,
               styles: clusterStylesFor('streetlight'),
             });
+            const safelightCluster = new ClustererCtor({
+              map: null,
+              averageCenter: true,
+              minLevel: clusterMinLevel,
+              calculator: CLUSTER_CALCULATOR,
+              texts: clusterCountText,
+              styles: clusterStylesFor('safelight'),
+            });
             const entCluster = new ClustererCtor({
               map: null,
               averageCenter: true,
@@ -1081,6 +1112,7 @@ function App() {
             });
             cctvClustererRef.current = cctvCluster;
             lightClustererRef.current = lightCluster;
+            safelightClustererRef.current = safelightCluster;
             entClustererRef.current = entCluster;
             convClustererRef.current = convCluster;
             policeClustererRef.current = policeCluster;
@@ -1093,6 +1125,10 @@ function App() {
               if (showStreetlightRef.current) {
                 lightCluster.addMarkers(lightMarkers);
                 lightCluster.setMap(mapNow);
+              }
+              if (showSafelightRef.current) {
+                safelightCluster.addMarkers(safelightMarkers);
+                safelightCluster.setMap(mapNow);
               }
               if (showEntRef.current) {
                 entCluster.addMarkers(entMarkers);
@@ -1123,10 +1159,12 @@ function App() {
       destMarkerRef.current = null;
       cctvClustererRef.current?.setMap(null);
       lightClustererRef.current?.setMap(null);
+      safelightClustererRef.current?.setMap(null);
       entClustererRef.current?.setMap(null);
       convClustererRef.current?.setMap(null);
       cctvClustererRef.current = null;
       lightClustererRef.current = null;
+      safelightClustererRef.current = null;
       entClustererRef.current = null;
       convClustererRef.current = null;
       if (el) {
@@ -1160,6 +1198,18 @@ function App() {
     } else {
       lightMarkersRef.current.forEach((m) => m.setMap(null));
       lightClustererRef.current?.clear();
+    }
+  };
+
+  const toggleSafelight = () => {
+    const next = !showSafelight;
+    setShowSafelight(next);
+    if (next) {
+      safelightClustererRef.current?.addMarkers(safelightMarkersRef.current);
+      safelightClustererRef.current?.setMap(mapInstanceRef.current);
+    } else {
+      safelightMarkersRef.current.forEach((m) => m.setMap(null));
+      safelightClustererRef.current?.clear();
     }
   };
 
@@ -1675,6 +1725,14 @@ function App() {
               aria-pressed={showStreetlight}
             >
               💡 가로등
+            </button>
+            <button
+              type="button"
+              className={`${styles.layerToggleBtn} ${showSafelight ? styles.layerToggleBtnSafelight : styles.layerToggleBtnOff}`}
+              onClick={toggleSafelight}
+              aria-pressed={showSafelight}
+            >
+              🔆 보안등
             </button>
             <button
               type="button"

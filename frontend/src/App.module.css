@@ -773,6 +773,12 @@
   color: #fff;
 }
 
+.layerToggleBtnSafelight {
+  background: rgba(16, 185, 129, 0.85);
+  border-color: #059669;
+  color: #fff;
+}
+
 .layerToggleBtnPolice {
   background: rgba(15, 118, 110, 0.85);
   border-color: #0f766e;
