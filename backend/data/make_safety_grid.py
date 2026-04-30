@@ -10,9 +10,8 @@ from scipy.spatial import cKDTree
 cctv_gwanak = pd.read_csv("cctv_raw.csv", encoding="cp949")
 cctv_gwanak = cctv_gwanak.rename(columns={"위도": "lat", "경도": "lng", "CCTV 수량": "qty"})
 
-# 동작구 CCTV (qty 컬럼 없으므로 1로 채움)
+# 동작구 CCTV (qty: 실제 카메라대수 사용)
 cctv_dongjak = pd.read_csv("cctv_dongjak.csv", encoding="utf-8-sig")
-cctv_dongjak["qty"] = 1
 
 cctv = pd.concat([cctv_gwanak[["lat","lng","qty"]], cctv_dongjak[["lat","lng","qty"]]], ignore_index=True)
 
