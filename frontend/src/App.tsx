@@ -972,6 +972,11 @@ function App() {
           new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
           { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
         );
+        const safelightIcon = new kakao.maps.MarkerImage(
+          `${base}/markers/safelight-dot.svg`,
+          new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+          { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
+        );
         const entIcon = new kakao.maps.MarkerImage(
           `${base}/markers/entertainment-dot.svg`,
           new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
@@ -1027,7 +1032,7 @@ function App() {
               (pt) =>
                 new kakao.maps.Marker({
                   position: new kakao.maps.LatLng(pt.lat, pt.lng),
-                  image: lightIcon,
+                  image: safelightIcon,
                 })
             );
             safelightMarkersRef.current = safelightMarkers;
