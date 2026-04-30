@@ -19,20 +19,34 @@ def main() -> None:
     ]
     cctv_dongjak = pd.read_csv(DATA / "cctv_dongjak.csv", encoding="utf-8-sig")
     cctv_dongjak = cctv_dongjak.rename(columns={"lat": "위도", "lng": "경도"})
-    cctv_df = pd.concat([cctv_gwanak[["위도","경도"]], cctv_dongjak[["위도","경도"]]], ignore_index=True)
+    cctv_df = pd.concat([cctv_gwanak[["위도", "경도"]], cctv_dongjak[["위도", "경도"]]], ignore_index=True)
 
     # 가로등: 관악구 + 동작구 가로등 + 동작구 보안등
     sl_gwanak = pd.read_csv(DATA / "streetlight_raw.csv", encoding="cp949")
     sl_gwanak = sl_gwanak[
         sl_gwanak["위도"].between(37.0, 38.0) & sl_gwanak["경도"].between(126.0, 128.0)
     ]
-    sl_dongjak   = pd.read_csv(DATA / "streetlight_dongjak.csv", encoding="utf-8-sig").rename(columns={"lat":"위도","lng":"경도"})
-    safe_dongjak = pd.read_csv(DATA / "safelight_dongjak.csv",   encoding="utf-8-sig").rename(columns={"lat":"위도","lng":"경도"})
-    sl_df = pd.concat([sl_gwanak[["위도","경도"]], sl_dongjak[["위도","경도"]], safe_dongjak[["위도","경도"]]], ignore_index=True)
+    sl_dongjak   = pd.read_csv(DATA / "streetlight_dongjak.csv", encoding="utf-8-sig").rename(columns={"lat": "위도", "lng": "경도"})
+    safe_dongjak = pd.read_csv(DATA / "safelight_dongjak.csv",   encoding="utf-8-sig").rename(columns={"lat": "위도", "lng": "경도"})
+    sl_df = pd.concat([sl_gwanak[["위도", "경도"]], sl_dongjak[["위도", "경도"]], safe_dongjak[["위도", "경도"]]], ignore_index=True)
 
-    ent_df    = pd.read_csv(DATA / "entertainment_gwanak.csv", encoding="utf-8-sig")
-    conv_df   = pd.read_csv(DATA / "convenience_gwanak.csv",   encoding="utf-8-sig")
-    police_df = pd.read_csv(DATA / "police_gwanak.csv",        encoding="utf-8-sig")
+    # 유흥업소: 관악구 + 동작구
+    ent_df = pd.concat([
+        pd.read_csv(DATA / "entertainment_gwanak.csv", encoding="utf-8-sig"),
+        pd.read_csv(DATA / "entertainment_dongjak.csv", encoding="utf-8-sig"),
+    ], ignore_index=True).drop_duplicates(subset=["lat", "lng"])
+
+    # 편의점: 관악구 + 동작구
+    conv_df = pd.concat([
+        pd.read_csv(DATA / "convenience_gwanak.csv", encoding="utf-8-sig"),
+        pd.read_csv(DATA / "convenience_dongjak.csv", encoding="utf-8-sig"),
+    ], ignore_index=True).drop_duplicates(subset=["lat", "lng"])
+
+    # 경찰서: 관악구 + 동작구
+    police_df = pd.concat([
+        pd.read_csv(DATA / "police_gwanak.csv", encoding="utf-8-sig"),
+        pd.read_csv(DATA / "police_dongjak.csv", encoding="utf-8-sig"),
+    ], ignore_index=True).drop_duplicates(subset=["lat", "lng"])
 
     out = {
         "cctv":          [{"lat": float(r["위도"]), "lng": float(r["경도"])} for _, r in cctv_df.iterrows()],
