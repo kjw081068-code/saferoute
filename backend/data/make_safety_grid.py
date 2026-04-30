@@ -6,14 +6,30 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 # ── 1. 데이터 로드 ────────────────────────────────────────────────
-cctv   = pd.read_csv("cctv_raw.csv", encoding="cp949")
-sl     = pd.read_csv("streetlight_raw.csv", encoding="cp949")
+# 관악구 CCTV
+cctv_gwanak = pd.read_csv("cctv_raw.csv", encoding="cp949")
+cctv_gwanak = cctv_gwanak.rename(columns={"위도": "lat", "경도": "lng", "CCTV 수량": "qty"})
+
+# 동작구 CCTV (qty 컬럼 없으므로 1로 채움)
+cctv_dongjak = pd.read_csv("cctv_dongjak.csv", encoding="utf-8-sig")
+cctv_dongjak["qty"] = 1
+
+cctv = pd.concat([cctv_gwanak[["lat","lng","qty"]], cctv_dongjak[["lat","lng","qty"]]], ignore_index=True)
+
+# 관악구 가로등
+sl_gwanak = pd.read_csv("streetlight_raw.csv", encoding="cp949")
+sl_gwanak = sl_gwanak.rename(columns={"위도": "lat", "경도": "lng"})
+
+# 동작구 가로등 + 보안등 (같은 light_count로 통합)
+sl_dongjak     = pd.read_csv("streetlight_dongjak.csv", encoding="utf-8-sig")
+safe_dongjak   = pd.read_csv("safelight_dongjak.csv",   encoding="utf-8-sig")
+
+sl = pd.concat([sl_gwanak[["lat","lng"]], sl_dongjak[["lat","lng"]], safe_dongjak[["lat","lng"]]], ignore_index=True)
+
 conv   = pd.read_csv("convenience_gwanak.csv", encoding="utf-8-sig")
 ent    = pd.read_csv("entertainment_gwanak.csv", encoding="utf-8-sig")
 police = pd.read_csv("police_gwanak.csv", encoding="utf-8-sig")
 
-cctv = cctv.rename(columns={"위도": "lat", "경도": "lng", "CCTV 수량": "qty"})
-sl   = sl.rename(columns={"위도": "lat", "경도": "lng"})
 conv = conv.rename(columns={"lat": "lat", "lng": "lng"})
 
 conv["lat"] = conv["lat"].astype(float)
@@ -27,9 +43,9 @@ LNG_M   = 111320 * np.cos(np.radians(REF_LAT))
 def to_xy(lat, lng):
     return lng * LNG_M, lat * LAT_M
 
-# ── 3. 관악구 경계 ────────────────────────────────────────────────
-MIN_LAT, MAX_LAT = 37.440, 37.496
-MIN_LNG, MAX_LNG = 126.898, 126.985
+# ── 3. 관악구 + 동작구 경계 ──────────────────────────────────────
+MIN_LAT, MAX_LAT = 37.440, 37.525
+MIN_LNG, MAX_LNG = 126.898, 126.990
 
 print(f"경계 위도: {MIN_LAT} ~ {MAX_LAT}")
 print(f"경계 경도: {MIN_LNG} ~ {MAX_LNG}")
