@@ -13,8 +13,6 @@ router = APIRouter()
 TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
 TMAP_POI_URL = "https://apis.openapi.sk.com/tmap/pois"
 SAMPLE_INTERVAL_M = 100       # 안전점수 샘플링 간격 (미터)
-WAYPOINT_INTERVAL_M = 100     # 경유지 간격 (미터)
-PERP_OFFSET_M = 50            # 수직 이동 거리 (미터)
 
 # 서울 기준 좌표-거리 변환 상수
 LAT_PER_M = 1 / 111_000
@@ -201,87 +199,23 @@ def _call_tmap(headers: dict, body: dict) -> Optional[dict]:
         return None
 
 
-def _interpolate_midpoints(
-    lat1: float, lng1: float, lat2: float, lng2: float
-) -> List[Tuple[float, float]]:
-    """출발-도착 직선을 100m 간격으로 선형 보간하여 중간 지점 리스트를 반환합니다.
-
-    출발/도착 지점은 포함되지 않습니다.
-    예: 1000m → n_segments=10 → 중간 지점 9개 (t=0.1, 0.2, ..., 0.9)
-    n_segments가 1 이하이면 빈 리스트 반환.
-    """
-    total_m = _straight_distance_m(lat1, lng1, lat2, lng2)
-    n_segments = int(total_m / WAYPOINT_INTERVAL_M)
-    if n_segments <= 1:
-        return []
-    midpoints = []
-    for i in range(1, n_segments):
-        t = i / n_segments
-        midpoints.append((
-            lat1 + t * (lat2 - lat1),
-            lng1 + t * (lng2 - lng1),
-        ))
-    return midpoints
 
 
 def _perpendicular_candidates(
     mid: Tuple[float, float],
     p1: Tuple[float, float],
     p2: Tuple[float, float],
-    offset_m: float = PERP_OFFSET_M,
+    offset_m: float = 100,
 ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-    """mid 지점에서 p1→p2 방향의 수직으로 좌/우 offset_m 지점을 반환합니다.
-
-    반환: (좌측 지점, 우측 지점)
-    수직 벡터: (-dlng_m, dlat_m) 방향 정규화 후 미터 단위 이동
-    """
+    """p1→p2 진행방향 기준 mid에서 수직 좌/우 offset_m 지점을 반환합니다."""
     dlat_m = (p2[0] - p1[0]) * 111_000
     dlng_m = (p2[1] - p1[1]) * 88_000
     magnitude = math.sqrt(dlat_m ** 2 + dlng_m ** 2)
     if magnitude == 0:
         return mid, mid
-
-    # 수직 단위 벡터 (좌측): (-dlng_m, dlat_m) 방향
-    perp_lat_unit = -dlng_m / magnitude
-    perp_lng_unit = dlat_m / magnitude
-
-    delta_lat = perp_lat_unit * offset_m * LAT_PER_M
-    delta_lng = perp_lng_unit * offset_m * LNG_PER_M
-
-    left = (mid[0] + delta_lat, mid[1] + delta_lng)
-    right = (mid[0] - delta_lat, mid[1] - delta_lng)
-    return left, right
-
-
-def _select_safest_waypoints(req: RouteRequest) -> List[Tuple[float, float]]:
-    """출발-도착 구간의 200m 간격 경유지를 안전점수 기준으로 선택합니다.
-
-    각 중간 지점에서 원본 / 좌 50m / 우 50m 후보 3개 중
-    safety_grid 점수가 가장 높은 지점을 경유지로 확정합니다.
-    """
-    midpoints = _interpolate_midpoints(
-        req.origin_lat, req.origin_lng, req.dest_lat, req.dest_lng
-    )
-    if not midpoints:
-        return []
-
-    all_points = [
-        (req.origin_lat, req.origin_lng),
-        *midpoints,
-        (req.dest_lat, req.dest_lng),
-    ]
-
-    selected = []
-    for i, mid in enumerate(midpoints):
-        prev = all_points[i]     # mid 이전 지점 (all_points 기준 인덱스 i)
-        nxt = all_points[i + 2]  # mid 다음 지점 (all_points 기준 인덱스 i+2)
-        left, right = _perpendicular_candidates(mid, prev, nxt)
-
-        candidates = [mid, left, right]
-        best = max(candidates, key=lambda c: _score_for_coord(c[0], c[1])[0])
-        selected.append(best)
-
-    return selected
+    perp_lat = -dlng_m / magnitude * offset_m * LAT_PER_M
+    perp_lng =  dlat_m / magnitude * offset_m * LNG_PER_M
+    return (mid[0] + perp_lat, mid[1] + perp_lng), (mid[0] - perp_lat, mid[1] - perp_lng)
 
 
 def _build_route_result(
@@ -318,81 +252,112 @@ def _build_safe_route(
     normal_coords: List[Tuple[float, float]],
     normal_duration_sec: int,
 ) -> Optional[RouteResult]:
-    """일반경로 좌표 기준으로 낮은 점수 구간만 우회하는 안전 경로를 생성합니다.
+    """일반경로에서 보통/위험 구간만 좌우 우회로로 교체하는 안전 경로를 생성합니다.
 
-    1. 일반경로 좌표를 100m 간격으로 샘플링
-    2. 각 지점의 점수가 '위험'/'보통'이면 좌/우 80m 후보와 비교해 더 안전한 경유지 선택
-    3. 선택된 경유지로 구간별 TMAP 호출 후 이어붙임
+    1. 일반경로를 100m 샘플링
+    2. 연속 보통/위험 구간의 진입 직전 안전점 A, 복귀 직후 안전점 B 식별
+       (A, B 모두 일반경로 위 실제 도로 좌표)
+    3. A→B 구간 중간점에서 진행방향 수직 좌/우 100m 중 더 안전한 점을 경유지 W로 선택
+    4. A→W→B TMAP 재호출 → 원래 A→B보다 점수 높을 때만 교체
+    5. 안전 구간은 일반경로 좌표 그대로 유지
     """
     sampled = _sample_coords(normal_coords, interval_m=100)
     if len(sampled) < 2:
         return None
 
-    # 보통/위험 구간에서만 우회 경유지 탐색
-    waypoints: List[Tuple[float, float]] = []
-    for i in range(1, len(sampled) - 1):
-        lat, lng = sampled[i]
-        score, grade = _score_for_coord(lat, lng)
-        if grade == "안전":
-            continue
-        # 보통/위험 → 좌/우 80m 탐색, 점수 개선 시에만 경유지 추가
-        prev = sampled[i - 1]
-        nxt = sampled[i + 1]
-        left, right = _perpendicular_candidates((lat, lng), prev, nxt, offset_m=80)
-        best = max([(lat, lng), left, right], key=lambda c: _score_for_coord(c[0], c[1])[0])
-        best_score, _ = _score_for_coord(best[0], best[1])
-        if best_score > score:
-            waypoints.append(best)
+    scores_grades = [_score_for_coord(lat, lng) for lat, lng in sampled]
 
-    # 우회할 경유지 없음 → 일반경로 좌표 그대로 사용 (TMAP 재호출 없음)
-    if not waypoints:
+    # 연속 보통/위험 구간 그룹화
+    stretches: List[Tuple[int, int]] = []
+    start_idx: Optional[int] = None
+    for i in range(1, len(sampled) - 1):
+        if scores_grades[i][1] != "안전":
+            if start_idx is None:
+                start_idx = i
+        else:
+            if start_idx is not None:
+                stretches.append((start_idx, i - 1))
+                start_idx = None
+    if start_idx is not None:
+        stretches.append((start_idx, len(sampled) - 2))
+
+    if not stretches:
         return _build_route_result("safe", normal_coords, normal_duration_sec)
 
-    # 우회 경유지 있음 → 경유지로 구간 TMAP 재호출
-    all_stops = [
-        (req.origin_lat, req.origin_lng),
-        *waypoints,
-        (req.dest_lat, req.dest_lng),
-    ]
+    # normal_coords에서 좌표의 가장 가까운 인덱스 찾기
+    def find_nc_idx(target: Tuple[float, float], from_idx: int = 0) -> int:
+        best, best_d = from_idx, float("inf")
+        for i in range(from_idx, len(normal_coords)):
+            d = (normal_coords[i][0] - target[0]) ** 2 + (normal_coords[i][1] - target[1]) ** 2
+            if d < best_d:
+                best_d, best = d, i
+        return best
 
-    all_coords: List[Tuple[float, float]] = []
-    total_duration_sec = 0
+    final_coords: List[Tuple[float, float]] = []
+    nc_pos = 0
+    any_replaced = False
 
-    for i in range(len(all_stops) - 1):
-        start = all_stops[i]
-        end = all_stops[i + 1]
+    for s, e in stretches:
+        a = sampled[s - 1]   # 위험 구간 진입 직전 안전점 (도로 위)
+        b = sampled[e + 1]   # 위험 구간 복귀 직후 안전점 (도로 위)
 
-        body = {
-            "startX": str(start[1]),
-            "startY": str(start[0]),
-            "endX": str(end[1]),
-            "endY": str(end[0]),
-            "reqCoordType": "WGS84GEO",
-            "resCoordType": "WGS84GEO",
-            "startName": "경유출발",
-            "endName": "경유도착",
-        }
+        a_nc = find_nc_idx(a, nc_pos)
+        b_nc = find_nc_idx(b, a_nc)
 
-        data = _call_tmap(headers, body)
-        if data is None:
-            return None
+        # A까지 일반경로 그대로 추가
+        final_coords.extend(normal_coords[nc_pos: a_nc + 1])
 
-        features = data.get("features", [])
-        if not features:
-            return None
+        # 위험 구간 중간점 기준 진행방향 수직 좌/우 100m 경유지 W
+        mid_idx = (s + e) // 2
+        mid_pt = sampled[mid_idx]
+        stretch_avg = sum(scores_grades[i][0] for i in range(s, e + 1)) / (e - s + 1)
 
-        total_duration_sec += features[0].get("properties", {}).get("totalTime", 0)
-        seg_coords = _extract_tmap_coords(features)
+        left, right = _perpendicular_candidates(mid_pt, a, b, offset_m=100)
+        best_w = max([left, right], key=lambda c: _score_for_coord(c[0], c[1])[0])
+        best_w_score = _score_for_coord(best_w[0], best_w[1])[0]
 
-        if all_coords and seg_coords:
-            seg_coords = seg_coords[1:]
-        all_coords.extend(seg_coords)
+        replaced = False
+        if best_w_score > stretch_avg:
+            # A→W, W→B 두 번 TMAP 호출
+            def _seg_body(start: Tuple[float, float], end: Tuple[float, float]) -> dict:
+                return {
+                    "startX": str(start[1]), "startY": str(start[0]),
+                    "endX": str(end[1]), "endY": str(end[0]),
+                    "reqCoordType": "WGS84GEO", "resCoordType": "WGS84GEO",
+                    "startName": "경유출발", "endName": "경유도착",
+                }
+            d1 = _call_tmap(headers, _seg_body(a, best_w))
+            d2 = _call_tmap(headers, _seg_body(best_w, b))
+            if d1 and d2:
+                f1, f2 = d1.get("features", []), d2.get("features", [])
+                c1 = _extract_tmap_coords(f1)
+                c2 = _extract_tmap_coords(f2)
+                if c1 and c2:
+                    alt = c1 + c2[1:]  # W 중복 제거
+                    alt_sampled = _sample_coords(alt, interval_m=100)
+                    if alt_sampled:
+                        alt_avg = sum(_score_for_coord(lat, lng)[0] for lat, lng in alt_sampled) / len(alt_sampled)
+                        if alt_avg > stretch_avg:
+                            final_coords.extend(alt[1:])  # A 중복 제거
+                            nc_pos = b_nc
+                            replaced = True
+                            any_replaced = True
 
-    if not all_coords:
+        if not replaced:
+            # 원래 구간 그대로 (A+1 ~ B-1)
+            final_coords.extend(normal_coords[a_nc + 1: b_nc])
+            nc_pos = b_nc
+
+    # 남은 경로 추가
+    final_coords.extend(normal_coords[nc_pos:])
+
+    if not final_coords:
         return None
 
-    all_coords = _remove_backtrack(all_coords)
-    return _build_route_result("safe", all_coords, total_duration_sec)
+    if any_replaced:
+        final_coords = _remove_backtrack(final_coords)
+
+    return _build_route_result("safe", final_coords, normal_duration_sec)
 
 
 def _fetch_direct_pedestrian(
