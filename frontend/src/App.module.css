@@ -38,7 +38,7 @@
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: radial-gradient(circle at 30% 30%, #5eb0ff 0%, #2a6bff 45%, #1a2a44 100%);
+  object-fit: cover;
   box-shadow: 0 8px 24px rgba(42, 107, 255, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }

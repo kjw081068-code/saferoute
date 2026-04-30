@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import styles from './App.module.css';
 
-const SILLIM_STATION = { lat: 37.5032, lng: 126.9477 }; // 상도역 7호선
+const SILLIM_STATION = { lat: 37.5030778, lng: 126.9477711 }; // 상도역 7호선
 const MAP_ZOOM_LEVEL = 4;
 /** 내 위치로 이동할 때 줌(숫자가 작을수록 확대 — 카카오맵 규칙) */
 const MAP_LOCATION_FOLLOW_LEVEL = 3;
@@ -1393,7 +1393,7 @@ function App() {
     <div className={styles.app}>
       <aside className={styles.sidebar}>
         <header className={styles.brandBlock}>
-          <div className={styles.logoMark} aria-hidden />
+          <img src="/logo.jpg" alt="로고" className={styles.logoMark} />
           <div>
             <h1 className={styles.appName}>보통의하루</h1>
             <p className={styles.appTagline}>안심 귀갓길 내비게이터</p>
