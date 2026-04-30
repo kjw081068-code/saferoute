@@ -6,17 +6,21 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 # ── 1. 데이터 로드 ────────────────────────────────────────────────
-cctv   = pd.read_csv("cctv_raw.csv", encoding="cp949")
-sl_raw = pd.read_csv("streetlight_raw.csv", encoding="cp949")
-conv   = pd.read_csv("convenience_dongjak.csv", encoding="utf-8-sig")
-ent    = pd.read_csv("entertainment_dongjak.csv", encoding="utf-8-sig")
-police = pd.read_csv("police_dongjak.csv", encoding="utf-8-sig")
+cctv      = pd.read_csv("cctv_raw.csv", encoding="cp949")
+sl_raw    = pd.read_csv("streetlight_raw.csv", encoding="cp949")
+safelight = pd.read_csv("safelight_dongjak.csv", encoding="utf-8-sig")
+conv      = pd.read_csv("convenience_dongjak.csv", encoding="utf-8-sig")
+ent       = pd.read_csv("entertainment_dongjak.csv", encoding="utf-8-sig")
+police    = pd.read_csv("police_dongjak.csv", encoding="utf-8-sig")
 
 cctv.columns = [c.strip() for c in cctv.columns]
 cctv = cctv.rename(columns={"위도": "lat", "경도": "lng", "CCTV 수량": "qty"})
 
 sl_raw.columns = ['id', 'lat', 'lng']
 sl = sl_raw[["lat", "lng"]].copy()
+
+safelight["lat"] = safelight["lat"].astype(float)
+safelight["lng"] = safelight["lng"].astype(float)
 
 conv["lat"] = conv["lat"].astype(float)
 conv["lng"] = conv["lng"].astype(float)
@@ -65,12 +69,21 @@ for i, idxs in enumerate(cctv_tree.query_ball_point(grid_xy, r=100)):
     raw = cctv["qty"].iloc[idxs].sum() if idxs else 0
     cctv_scores[i] = min(raw, 4) * 5  # 5점/대, 최대 20점
 
-# 가로등: 반경 80m, 최대 3개 캡
+# 가로등(대로변): 반경 80m, 최대 3개 캡, 5점/개
 lx, ly = to_xy(sl["lat"].values, sl["lng"].values)
 sl_tree = cKDTree(np.column_stack([lx, ly]))
 light_scores = np.zeros(len(grid_xy))
 for i, idxs in enumerate(sl_tree.query_ball_point(grid_xy, r=80)):
     light_scores[i] = min(len(idxs), 3) * 5  # 5점/개, 최대 15점
+
+# 보안등(골목길): 반경 80m, 최대 3개 캡, 3점/개
+sx, sy = to_xy(safelight["lat"].values, safelight["lng"].values)
+safelight_tree = cKDTree(np.column_stack([sx, sy]))
+safelight_scores = np.zeros(len(grid_xy))
+safelight_counts = np.zeros(len(grid_xy), dtype=int)
+for i, idxs in enumerate(safelight_tree.query_ball_point(grid_xy, r=80)):
+    safelight_counts[i] = min(len(idxs), 3)
+    safelight_scores[i] = safelight_counts[i] * 3  # 3점/개, 최대 9점
 
 # 편의점: 반경 100m, 최대 2개 캡
 vx, vy = to_xy(conv["lat"].values, conv["lng"].values)
@@ -96,7 +109,7 @@ for i, idxs in enumerate(police_tree.query_ball_point(grid_xy, r=300)):
     police_counts[i] = min(len(idxs), 1)
 
 # ── 6. 안전점수 계산 ─────────────────────────────────────────────
-scores = np.minimum(np.maximum(40 + cctv_scores + light_scores + conv_scores + police_counts * 10 - ent_deducts, 10), 100)
+scores = np.minimum(np.maximum(40 + cctv_scores + light_scores + safelight_scores + conv_scores + police_counts * 10 - ent_deducts, 10), 100)
 
 # 등급: 상대평가 (하위 30% → 위험, 중위 40% → 보통, 상위 30% → 안전)
 n     = len(scores)
@@ -106,15 +119,16 @@ grades = np.where(ranks < n * 0.30, "위험",
 
 # ── 7. 결과 저장 ─────────────────────────────────────────────────
 result = pd.DataFrame({
-    "위도":         grid_lats,
-    "경도":         grid_lngs,
-    "cctv_count":   (cctv_scores / 5).astype(int),
-    "light_count":  (light_scores / 5).astype(int),
-    "conv_count":   (conv_scores / 5).astype(int),
-    "ent_count":    ent_counts,
-    "police_count": police_counts,
-    "score":        scores.round(2),
-    "grade":        grades,
+    "위도":           grid_lats,
+    "경도":           grid_lngs,
+    "cctv_count":     (cctv_scores / 5).astype(int),
+    "light_count":    (light_scores / 5).astype(int),
+    "safelight_count": safelight_counts,
+    "conv_count":     (conv_scores / 5).astype(int),
+    "ent_count":      ent_counts,
+    "police_count":   police_counts,
+    "score":          scores.round(2),
+    "grade":          grades,
 })
 
 result.to_csv("safety_grid_dongjak.csv", index=False, encoding="utf-8-sig")

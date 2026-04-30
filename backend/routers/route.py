@@ -13,8 +13,6 @@ router = APIRouter()
 TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
 TMAP_POI_URL = "https://apis.openapi.sk.com/tmap/pois"
 SAMPLE_INTERVAL_M = 100       # 안전점수 샘플링 간격 (미터)
-# 직선거리 이하(미터): 안전(경유지)+일반 두 경로 모두 반환. 초과: 일반 경로만 반환.
-BOTH_ROUTES_MAX_DIST_M = 3000
 WAYPOINT_INTERVAL_M = 100     # 경유지 간격 (미터)
 PERP_OFFSET_M = 50            # 수직 이동 거리 (미터)
 
@@ -314,13 +312,43 @@ def _build_route_result(
     )
 
 
-def _build_safe_route(req: RouteRequest, headers: dict) -> Optional[RouteResult]:
-    """안전 경유지를 통해 구간별 TMAP을 호출하고 경로를 이어붙여 반환합니다.
+def _build_safe_route(
+    req: RouteRequest,
+    headers: dict,
+    normal_coords: List[Tuple[float, float]],
+    normal_duration_sec: int,
+) -> Optional[RouteResult]:
+    """일반경로 좌표 기준으로 낮은 점수 구간만 우회하는 안전 경로를 생성합니다.
 
-    200m 구간마다 별도 TMAP 호출 후 좌표를 연결합니다.
-    어떤 구간이라도 TMAP 호출 실패 시 None 반환.
+    1. 일반경로 좌표를 100m 간격으로 샘플링
+    2. 각 지점의 점수가 '위험'/'보통'이면 좌/우 80m 후보와 비교해 더 안전한 경유지 선택
+    3. 선택된 경유지로 구간별 TMAP 호출 후 이어붙임
     """
-    waypoints = _select_safest_waypoints(req)
+    sampled = _sample_coords(normal_coords, interval_m=100)
+    if len(sampled) < 2:
+        return None
+
+    # 보통/위험 구간에서만 우회 경유지 탐색
+    waypoints: List[Tuple[float, float]] = []
+    for i in range(1, len(sampled) - 1):
+        lat, lng = sampled[i]
+        score, grade = _score_for_coord(lat, lng)
+        if grade == "안전":
+            continue
+        # 보통/위험 → 좌/우 80m 탐색, 점수 개선 시에만 경유지 추가
+        prev = sampled[i - 1]
+        nxt = sampled[i + 1]
+        left, right = _perpendicular_candidates((lat, lng), prev, nxt, offset_m=80)
+        best = max([(lat, lng), left, right], key=lambda c: _score_for_coord(c[0], c[1])[0])
+        best_score, _ = _score_for_coord(best[0], best[1])
+        if best_score > score:
+            waypoints.append(best)
+
+    # 우회할 경유지 없음 → 일반경로 좌표 그대로 사용 (TMAP 재호출 없음)
+    if not waypoints:
+        return _build_route_result("safe", normal_coords, normal_duration_sec)
+
+    # 우회 경유지 있음 → 경유지로 구간 TMAP 재호출
     all_stops = [
         (req.origin_lat, req.origin_lng),
         *waypoints,
@@ -347,7 +375,7 @@ def _build_safe_route(req: RouteRequest, headers: dict) -> Optional[RouteResult]
 
         data = _call_tmap(headers, body)
         if data is None:
-            return None  # 구간 호출 실패 → 상위에서 폴백 처리
+            return None
 
         features = data.get("features", [])
         if not features:
@@ -357,7 +385,7 @@ def _build_safe_route(req: RouteRequest, headers: dict) -> Optional[RouteResult]
         seg_coords = _extract_tmap_coords(features)
 
         if all_coords and seg_coords:
-            seg_coords = seg_coords[1:]  # 이전 구간 끝점 중복 제거
+            seg_coords = seg_coords[1:]
         all_coords.extend(seg_coords)
 
     if not all_coords:
@@ -408,22 +436,16 @@ def get_safe_route(req: RouteRequest):
         "Content-Type": "application/json",
     }
 
-    straight_dist = _straight_distance_m(
-        req.origin_lat, req.origin_lng, req.dest_lat, req.dest_lng
-    )
-
-    # ── 3km 초과: 일반 경로(직접 도보)만 ──
-    if straight_dist > BOTH_ROUTES_MAX_DIST_M:
-        normal_coords, normal_duration_sec = _fetch_direct_pedestrian(req, headers)
-        normal_only = _build_route_result("normal", normal_coords, normal_duration_sec)
-        return RouteResponse(routes=[normal_only])
-
-    # ── 3km 이하: 일반 + 안전 둘 다 (안전 생성 실패 시 일반 좌표로 safe 대체) ──
+    # ── 항상 일반 + 안전 둘 다 반환 ──
     normal_coords, normal_duration_sec = _fetch_direct_pedestrian(req, headers)
     normal_result = _build_route_result("normal", normal_coords, normal_duration_sec)
 
-    safe_result = _build_safe_route(req, headers)
-    if safe_result is None:
+    safe_result = _build_safe_route(req, headers, normal_coords, normal_duration_sec)
+    if (
+        safe_result is None
+        or safe_result.avg_score < normal_result.avg_score  # 점수가 낮을 때만 fallback (같으면 허용)
+        or safe_result.duration > normal_result.duration * 1.3
+    ):
         safe_result = _build_route_result("safe", normal_coords, normal_duration_sec)
 
     return RouteResponse(routes=[safe_result, normal_result])

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 router = APIRouter()
 
 CSV_PATH = Path(__file__).parents[1] / "data" / "safety_grid.csv"
+CSV_PATH_DONGJAK = Path(__file__).parents[1] / "data" / "safety_grid_dongjak.csv"
 CCTV_CSV_PATH = Path(__file__).parents[1] / "data" / "cctv_raw.csv"
 STREETLIGHT_CSV_PATH = Path(__file__).parents[1] / "data" / "streetlight_raw.csv"
 
@@ -19,6 +20,10 @@ def _load_grid() -> pd.DataFrame:
     if _grid_df is None:
         df = pd.read_csv(CSV_PATH, encoding="utf-8-sig")
         df = df.rename(columns={"위도": "lat", "경도": "lng"})
+        if CSV_PATH_DONGJAK.exists():
+            df2 = pd.read_csv(CSV_PATH_DONGJAK, encoding="utf-8-sig")
+            df2 = df2.rename(columns={"위도": "lat", "경도": "lng"})
+            df = pd.concat([df, df2], ignore_index=True)
         _grid_df = df
     return _grid_df
 

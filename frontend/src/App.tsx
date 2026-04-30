@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import styles from './App.module.css';
 
-const SILLIM_STATION = { lat: 37.4846, lng: 126.9294 };
+const SILLIM_STATION = { lat: 37.5032, lng: 126.9477 }; // 상도역 7호선
 const MAP_ZOOM_LEVEL = 4;
 /** 내 위치로 이동할 때 줌(숫자가 작을수록 확대 — 카카오맵 규칙) */
 const MAP_LOCATION_FOLLOW_LEVEL = 3;
@@ -746,13 +746,11 @@ function App() {
     const q = query.trim();
     if (!q) return;
     const suggestions = target === 'origin' ? originSuggestions : destSuggestions;
-    const suggestionsQuery = target === 'origin' ? originSuggestionsQueryRef.current : destSuggestionsQueryRef.current;
-    // suggestions가 현재 입력과 동일한 쿼리의 결과일 때만 즉시 선택
-    if (suggestions.length > 0 && suggestionsQuery.trim() === q) {
+    if (suggestions.length > 0) {
       pendingEnterRef.current[target] = null;
       handleSelectPoi(target, suggestions[0]!);
     } else {
-      // stale 결과이거나 아직 없음 → 최신 결과 올 때까지 대기
+      // 아직 결과 없음 → 최신 결과 올 때까지 대기
       pendingEnterRef.current[target] = q;
     }
   };
