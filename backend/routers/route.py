@@ -6,7 +6,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from routers.safety import _load_grid
+from routers.safety import _load_grid, _cctv_score_for_coord, _safelight_score_for_coord, score_to_grade_realtime
 
 router = APIRouter()
 
@@ -114,11 +114,24 @@ def _sample_coords(
 
 
 def _score_for_coord(lat: float, lng: float) -> Tuple[float, str]:
-    """safety_grid에서 최근접 격자의 (score, grade)를 반환합니다."""
+    """격자 기반 점수에서 CCTV·보안등 기여분을 실시간 원형 조회로 교체하여 반환합니다."""
     df = _load_grid()
     idx = ((df["lat"] - lat) ** 2 + (df["lng"] - lng) ** 2).idxmin()
     row = df.loc[idx]
-    return float(row["score"]), str(row["grade"])
+
+    grid_score = float(row["score"])
+    # 격자에 이미 포함된 CCTV 100m 기여분 제거 (공식: min(qty, 4) * 5)
+    old_cctv = min(int(row.get("cctv_count", 0)), 4) * 5
+    # 격자에 이미 포함된 보안등 80m 기여분 제거 (공식: min(count, 3) * 3)
+    old_safelight = min(int(row.get("safelight_count", 0)), 3) * 3
+    # 이중 반경 실시간 CCTV 점수 (15m 전체 + 15~30m 절반)
+    new_cctv = _cctv_score_for_coord(lat, lng)
+    # 5m 반경 실시간 보안등 점수
+    new_safelight = _safelight_score_for_coord(lat, lng, radius_m=5.0)
+
+    adjusted = min(max(grid_score - old_cctv - old_safelight + new_cctv + new_safelight, 10.0), 100.0)
+    grade = score_to_grade_realtime(adjusted)
+    return adjusted, grade
 
 
 def _score_to_grade(segments: list) -> str:
