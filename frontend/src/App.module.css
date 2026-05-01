@@ -961,6 +961,11 @@
 
 /* --- 모바일 전용 (768px 이하). PC(769px~)는 기본 그리드·스타일 유지 --- */
 @media (max-width: 768px) {
+  :root {
+    /* 하단(안전/일반 경로) 시트 높이 — 지도 일부 침범하되 과하지 않게 */
+    --mobileBottomSheetH: clamp(180px, 28dvh, 300px);
+  }
+
   .app {
     display: flex;
     flex-direction: column;
@@ -1148,7 +1153,7 @@
     min-width: 0;
     overflow: hidden;
     /* 하단 시트가 fixed로 올라오므로 지도도 그만큼 공간 확보 */
-    padding-bottom: clamp(220px, 38dvh, 420px);
+    padding-bottom: var(--mobileBottomSheetH);
   }
 
   .desktopOnlyMapStack {
@@ -1159,7 +1164,7 @@
     display: flex;
     position: absolute;
     left: 12px;
-    bottom: 12px;
+    bottom: calc(12px + var(--mobileBottomSheetH));
     z-index: 12;
     flex-direction: column;
     align-items: flex-start;
@@ -1258,7 +1263,7 @@
   .topRightClock {
     top: auto;
     right: 12px;
-    bottom: 12px;
+    bottom: calc(12px + var(--mobileBottomSheetH));
     z-index: 12;
   }
 
@@ -1274,7 +1279,7 @@
     right: 0;
     bottom: 0;
     z-index: 20;
-    height: clamp(220px, 38dvh, 420px);
+    height: var(--mobileBottomSheetH);
     overflow-y: auto;
     overflow-x: hidden;
     gap: 10px;
