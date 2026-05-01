@@ -965,6 +965,7 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    height: 100dvh;
     min-height: 0;
     width: 100vw;
     /* 상단·지도·하단만 쓰고 페이지 전체 스크롤 방지 */
@@ -1146,6 +1147,8 @@
     min-height: 0;
     min-width: 0;
     overflow: hidden;
+    /* 하단 시트가 fixed로 올라오므로 지도도 그만큼 공간 확보 */
+    padding-bottom: clamp(220px, 38dvh, 420px);
   }
 
   .desktopOnlyMapStack {
@@ -1266,13 +1269,16 @@
   /* 하단 시트: 경로 점수 + 클릭 안전도 — 시안 비율(얇은 하단) */
   .sidebarBottom {
     order: 3;
-    flex: 0 0 auto;
-    flex-shrink: 0;
-    max-height: min(32vh, 320px);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    height: clamp(220px, 38dvh, 420px);
     overflow-y: auto;
     overflow-x: hidden;
     gap: 10px;
-    padding: 10px 10px 14px;
+    padding: 10px 10px calc(14px + env(safe-area-inset-bottom, 0px));
     background: #141c28;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     border-top-left-radius: 18px;
