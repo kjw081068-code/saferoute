@@ -252,14 +252,14 @@ def _build_safe_route(
     normal_coords: List[Tuple[float, float]],
     normal_duration_sec: int,
 ) -> Optional[RouteResult]:
-    """일반경로에서 보통/위험 구간만 좌우 우회로로 교체하는 안전 경로를 생성합니다.
+    """일반경로를 100m마다 점수 확인하며 보통/위험 격자에서 좌우 우회를 시도합니다.
 
-    1. 일반경로를 100m 샘플링
-    2. 연속 보통/위험 구간의 진입 직전 안전점 A, 복귀 직후 안전점 B 식별
-       (A, B 모두 일반경로 위 실제 도로 좌표)
-    3. A→B 구간 중간점에서 진행방향 수직 좌/우 100m 중 더 안전한 점을 경유지 W로 선택
-    4. A→W→B TMAP 재호출 → 원래 A→B보다 점수 높을 때만 교체
-    5. 안전 구간은 일반경로 좌표 그대로 유지
+    각 100m 샘플 지점마다:
+    - 안전 → 일반경로 그대로 통과
+    - 보통/위험 → 진행방향 수직 좌/우 100m 중 더 안전한 점 W 탐색
+      - W가 현재보다 점수 높으면 → 이전 점 → W → 다음 점 으로 TMAP 재호출해 교체
+      - W가 없거나 더 낮으면 → 그냥 통과
+    경유지는 개선이 있을 때만 추가되므로 불필요한 우회 최소화.
     """
     sampled = _sample_coords(normal_coords, interval_m=100)
     if len(sampled) < 2:
@@ -267,24 +267,7 @@ def _build_safe_route(
 
     scores_grades = [_score_for_coord(lat, lng) for lat, lng in sampled]
 
-    # 연속 보통/위험 구간 그룹화
-    stretches: List[Tuple[int, int]] = []
-    start_idx: Optional[int] = None
-    for i in range(1, len(sampled) - 1):
-        if scores_grades[i][1] != "안전":
-            if start_idx is None:
-                start_idx = i
-        else:
-            if start_idx is not None:
-                stretches.append((start_idx, i - 1))
-                start_idx = None
-    if start_idx is not None:
-        stretches.append((start_idx, len(sampled) - 2))
-
-    if not stretches:
-        return _build_route_result("safe", normal_coords, normal_duration_sec)
-
-    # normal_coords에서 좌표의 가장 가까운 인덱스 찾기
+    # normal_coords에서 target과 가장 가까운 인덱스 찾기 (from_idx 이후)
     def find_nc_idx(target: Tuple[float, float], from_idx: int = 0) -> int:
         best, best_d = from_idx, float("inf")
         for i in range(from_idx, len(normal_coords)):
@@ -297,56 +280,66 @@ def _build_safe_route(
     nc_pos = 0
     any_replaced = False
 
-    for s, e in stretches:
-        a = sampled[s - 1]   # 위험 구간 진입 직전 안전점 (도로 위)
-        b = sampled[e + 1]   # 위험 구간 복귀 직후 안전점 (도로 위)
+    for i in range(1, len(sampled) - 1):
+        lat, lng = sampled[i]
+        score, grade = scores_grades[i]
 
-        a_nc = find_nc_idx(a, nc_pos)
-        b_nc = find_nc_idx(b, a_nc)
+        # 현재 샘플 지점의 normal_coords 인덱스
+        curr_nc = find_nc_idx(sampled[i], nc_pos)
 
-        # A까지 일반경로 그대로 추가
-        final_coords.extend(normal_coords[nc_pos: a_nc + 1])
+        if grade == "안전":
+            # 안전 → 현재 지점까지 일반경로 그대로
+            final_coords.extend(normal_coords[nc_pos: curr_nc + 1])
+            nc_pos = curr_nc + 1
+            continue
 
-        # 위험 구간 중간점 기준 진행방향 수직 좌/우 100m 경유지 W
-        mid_idx = (s + e) // 2
-        mid_pt = sampled[mid_idx]
-        stretch_avg = sum(scores_grades[i][0] for i in range(s, e + 1)) / (e - s + 1)
-
-        left, right = _perpendicular_candidates(mid_pt, a, b, offset_m=100)
+        # 보통/위험 → 진행방향 수직 좌/우 100m 탐색
+        prev_pt = sampled[i - 1]
+        next_pt = sampled[i + 1]
+        left, right = _perpendicular_candidates((lat, lng), prev_pt, next_pt, offset_m=100)
         best_w = max([left, right], key=lambda c: _score_for_coord(c[0], c[1])[0])
         best_w_score = _score_for_coord(best_w[0], best_w[1])[0]
 
-        replaced = False
-        if best_w_score > stretch_avg:
-            # A→W, W→B 두 번 TMAP 호출
-            def _seg_body(start: Tuple[float, float], end: Tuple[float, float]) -> dict:
-                return {
-                    "startX": str(start[1]), "startY": str(start[0]),
-                    "endX": str(end[1]), "endY": str(end[0]),
-                    "reqCoordType": "WGS84GEO", "resCoordType": "WGS84GEO",
-                    "startName": "경유출발", "endName": "경유도착",
-                }
-            d1 = _call_tmap(headers, _seg_body(a, best_w))
-            d2 = _call_tmap(headers, _seg_body(best_w, b))
-            if d1 and d2:
-                f1, f2 = d1.get("features", []), d2.get("features", [])
-                c1 = _extract_tmap_coords(f1)
-                c2 = _extract_tmap_coords(f2)
-                if c1 and c2:
-                    alt = c1 + c2[1:]  # W 중복 제거
-                    alt_sampled = _sample_coords(alt, interval_m=100)
-                    if alt_sampled:
-                        alt_avg = sum(_score_for_coord(lat, lng)[0] for lat, lng in alt_sampled) / len(alt_sampled)
-                        if alt_avg > stretch_avg:
-                            final_coords.extend(alt[1:])  # A 중복 제거
-                            nc_pos = b_nc
-                            replaced = True
-                            any_replaced = True
+        if best_w_score <= score:
+            # 주변도 더 나은 곳 없음 → 그냥 통과
+            final_coords.extend(normal_coords[nc_pos: curr_nc + 1])
+            nc_pos = curr_nc + 1
+            continue
 
-        if not replaced:
-            # 원래 구간 그대로 (A+1 ~ B-1)
-            final_coords.extend(normal_coords[a_nc + 1: b_nc])
-            nc_pos = b_nc
+        # W가 더 안전 → 이전 점(prev) → W → 현재 점(curr) TMAP 재호출
+        prev_nc = find_nc_idx(prev_pt, max(0, nc_pos - 1))
+
+        def _seg_body(start: Tuple[float, float], end: Tuple[float, float]) -> dict:
+            return {
+                "startX": str(start[1]), "startY": str(start[0]),
+                "endX": str(end[1]), "endY": str(end[0]),
+                "reqCoordType": "WGS84GEO", "resCoordType": "WGS84GEO",
+                "startName": "경유출발", "endName": "경유도착",
+            }
+
+        d1 = _call_tmap(headers, _seg_body(prev_pt, best_w))
+        d2 = _call_tmap(headers, _seg_body(best_w, (lat, lng)))
+
+        if d1 and d2:
+            f1, f2 = d1.get("features", []), d2.get("features", [])
+            c1 = _extract_tmap_coords(f1)
+            c2 = _extract_tmap_coords(f2)
+            if c1 and c2:
+                alt = c1 + c2[1:]
+                alt_sampled = _sample_coords(alt, interval_m=100)
+                if alt_sampled:
+                    alt_avg = sum(_score_for_coord(lt, lg)[0] for lt, lg in alt_sampled) / len(alt_sampled)
+                    if alt_avg > score:
+                        # prev까지 일반경로 + 대체 구간 추가
+                        final_coords.extend(normal_coords[nc_pos: prev_nc])
+                        final_coords.extend(alt)
+                        nc_pos = curr_nc + 1
+                        any_replaced = True
+                        continue
+
+        # TMAP 실패 또는 개선 없음 → 그냥 통과
+        final_coords.extend(normal_coords[nc_pos: curr_nc + 1])
+        nc_pos = curr_nc + 1
 
     # 남은 경로 추가
     final_coords.extend(normal_coords[nc_pos:])
