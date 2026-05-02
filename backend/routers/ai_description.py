@@ -7,7 +7,7 @@ from google import genai
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from routers.safety import _load_grid
+import routers.safety as _safety
 
 router = APIRouter()
 
@@ -33,22 +33,48 @@ class RouteDescriptionResponse(BaseModel):
     ai_summary: str
 
 
-# ── safety_grid에서 구간별 상세 데이터 조회 ──────────────────────────────────
+# ── 실시간 반경 방식으로 구간별 상세 데이터 조회 ─────────────────────────────
 
-def _get_segment_detail(lat: float, lng: float) -> dict:
-    """safety_grid에서 lat/lng에 가장 가까운 격자의 상세 데이터를 반환합니다."""
-    df = _load_grid()
-    idx = ((df["lat"] - lat) ** 2 + (df["lng"] - lng) ** 2).idxmin()
-    row = df.loc[idx]
+def _get_segment_detail(lat: float, lng: float, score: float, grade: str) -> dict:
+    """실시간 반경 쿼리로 좌표의 안전 요소 개수를 반환합니다."""
+    _safety._load_cctv()
+    _safety._load_streetlight()
+    _safety._load_safelight()
+    _safety._load_convenience()
+    _safety._load_entertainment()
+
+    x, y = lng * _safety._LNG_M, lat * _safety._LAT_M
+
+    cctv_count = 0
+    if _safety._cctv_tree is not None and len(_safety._cctv_qty) > 0:
+        idxs = _safety._cctv_tree.query_ball_point([x, y], r=30.0)
+        cctv_count = round(float(_safety._cctv_qty[list(idxs)].sum())) if idxs else 0
+
+    street_count = 0
+    if _safety._streetlight_tree is not None:
+        street_count = len(_safety._streetlight_tree.query_ball_point([x, y], r=20.0))
+
+    safe_count = 0
+    if _safety._safelight_tree is not None:
+        safe_count = len(_safety._safelight_tree.query_ball_point([x, y], r=5.0))
+
+    conv_count = 0
+    if _safety._convenience_tree is not None:
+        conv_count = len(_safety._convenience_tree.query_ball_point([x, y], r=100.0))
+
+    ent_count = 0
+    if _safety._entertainment_tree is not None:
+        ent_count = len(_safety._entertainment_tree.query_ball_point([x, y], r=50.0))
+
     return {
         "lat": lat,
         "lng": lng,
-        "score": float(row["score"]),
-        "grade": str(row["grade"]),
-        "cctv_count": int(row["cctv_count"]),
-        "light_count": int(row["light_count"]),
-        "conv_count": int(row["conv_count"]),
-        "ent_count": int(row["ent_count"]),
+        "score": score,
+        "grade": grade,
+        "cctv_count": cctv_count,
+        "light_count": street_count + safe_count,
+        "conv_count": conv_count,
+        "ent_count": ent_count,
     }
 
 
@@ -124,8 +150,8 @@ def get_route_description(req: RouteDescriptionRequest):
     if not req.segments:
         raise HTTPException(status_code=400, detail="segments가 비어 있습니다.")
 
-    # safety_grid에서 각 구간의 상세 데이터 조회
-    details = [_get_segment_detail(seg.lat, seg.lng) for seg in req.segments]
+    # 실시간 반경 방식으로 각 구간의 상세 데이터 조회
+    details = [_get_segment_detail(seg.lat, seg.lng, seg.score, seg.grade) for seg in req.segments]
 
     # Gemini API 호출
     try:

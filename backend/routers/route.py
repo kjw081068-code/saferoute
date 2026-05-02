@@ -6,7 +6,12 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from routers.safety import _load_grid, _cctv_score_for_coord, _safelight_score_for_coord, score_to_grade_realtime
+from routers.safety import (
+    _cctv_score_for_coord, _safelight_score_for_coord,
+    _streetlight_score_for_coord, _convenience_score_for_coord,
+    _police_score_for_coord, _entertainment_score_for_coord,
+    score_to_grade_realtime,
+)
 
 router = APIRouter()
 
@@ -114,24 +119,18 @@ def _sample_coords(
 
 
 def _score_for_coord(lat: float, lng: float) -> Tuple[float, str]:
-    """격자 기반 점수에서 CCTV·보안등 기여분을 실시간 원형 조회로 교체하여 반환합니다."""
-    df = _load_grid()
-    idx = ((df["lat"] - lat) ** 2 + (df["lng"] - lng) ** 2).idxmin()
-    row = df.loc[idx]
-
-    grid_score = float(row["score"])
-    # 격자에 이미 포함된 CCTV 100m 기여분 제거 (공식: min(qty, 4) * 5)
-    old_cctv = min(int(row.get("cctv_count", 0)), 4) * 5
-    # 격자에 이미 포함된 보안등 80m 기여분 제거 (공식: min(count, 3) * 3)
-    old_safelight = min(int(row.get("safelight_count", 0)), 3) * 3
-    # 이중 반경 실시간 CCTV 점수 (15m 전체 + 15~30m 절반)
-    new_cctv = _cctv_score_for_coord(lat, lng)
-    # 5m 반경 실시간 보안등 점수
-    new_safelight = _safelight_score_for_coord(lat, lng, radius_m=5.0)
-
-    adjusted = min(max(grid_score - old_cctv - old_safelight + new_cctv + new_safelight, 10.0), 100.0)
-    grade = score_to_grade_realtime(adjusted)
-    return adjusted, grade
+    """모든 요소를 실시간 반경으로 직접 계산해 안전점수를 반환합니다."""
+    score = max(
+        40.0
+        + _cctv_score_for_coord(lat, lng)
+        + _streetlight_score_for_coord(lat, lng)
+        + _safelight_score_for_coord(lat, lng, radius_m=5.0)
+        + _convenience_score_for_coord(lat, lng)
+        + _police_score_for_coord(lat, lng)
+        - _entertainment_score_for_coord(lat, lng),
+        10.0,
+    )
+    return score, score_to_grade_realtime(score)
 
 
 def _score_to_grade(segments: list) -> str:
@@ -148,33 +147,17 @@ def _score_to_grade(segments: list) -> str:
     return "보통"
 
 
-def _segment_midpoint(p1: Tuple[float, float], p2: Tuple[float, float]) -> Tuple[float, float]:
-    return ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
-
-
-def _segment_angle(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
-    """p1→p2 방향 각도 (라디안)"""
-    return math.atan2(p2[1] - p1[1], p2[0] - p1[0])
-
-
-def _angle_diff(a1: float, a2: float) -> float:
-    """두 각도의 차이 (0 ~ π)"""
-    diff = abs(a1 - a2) % (2 * math.pi)
-    return diff if diff <= math.pi else 2 * math.pi - diff
-
 
 def _remove_backtrack(
     coords: List[Tuple[float, float]],
-    proximity_m: float = 15.0,
-    opposite_threshold: float = 2.09,  # 약 120° 이상이면 반대 방향으로 판단
+    proximity_m: float = 20.0,
 ) -> List[Tuple[float, float]]:
-    """경로 내 역주행(같은 도로를 반대 방향으로 지나는) 구간을 제거합니다.
+    """경로에서 같은 위치를 두 번 지나는 루프 구간을 제거합니다.
 
-    세그먼트 i와 세그먼트 j의 중간점이 proximity_m 이내이고
-    진행 방향이 반대(angle_diff > opposite_threshold)인 경우
-    i+1 ~ j 구간을 잘라내고 i에서 j+1로 바로 연결합니다.
+    점 i와 점 j(j >= i+2)의 거리가 proximity_m 이내이면
+    i+1 ~ j-1 루프를 제거하고 i에서 j로 직접 연결합니다.
     """
-    if len(coords) < 4:
+    if len(coords) < 3:
         return coords
 
     result = list(coords)
@@ -183,16 +166,9 @@ def _remove_backtrack(
         changed = False
         n = len(result)
         for i in range(n - 2):
-            mid_i = _segment_midpoint(result[i], result[i + 1])
-            dir_i = _segment_angle(result[i], result[i + 1])
-            for j in range(i + 1, n - 1):
-                mid_j = _segment_midpoint(result[j], result[j + 1])
-                if _haversine_m(mid_i[0], mid_i[1], mid_j[0], mid_j[1]) > proximity_m:
-                    continue
-                dir_j = _segment_angle(result[j], result[j + 1])
-                if _angle_diff(dir_i, dir_j) >= opposite_threshold:
-                    # i+1 ~ j 구간(역주행 왕복)을 제거하고 i → j+1 연결
-                    result = result[: i + 1] + result[j + 1 :]
+            for j in range(i + 2, n):
+                if _haversine_m(result[i][0], result[i][1], result[j][0], result[j][1]) <= proximity_m:
+                    result = result[: i + 1] + result[j:]
                     changed = True
                     break
             if changed:
@@ -210,6 +186,37 @@ def _call_tmap(headers: dict, body: dict) -> Optional[dict]:
         return resp.json()
     except (httpx.HTTPStatusError, httpx.RequestError):
         return None
+
+
+def _find_poi_near(lat: float, lng: float, radius_m: float, tmap_key: str) -> Optional[Tuple[float, float]]:
+    """좌표 반경 내 실제 도로 위 POI를 찾아 반환합니다. 없으면 None."""
+    for keyword in ["편의점", "지하철역", "버스정류장"]:
+        params = {
+            "version": "1",
+            "searchKeyword": keyword,
+            "count": 3,
+            "appKey": tmap_key,
+            "centerLat": str(lat),
+            "centerLon": str(lng),
+        }
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.get(TMAP_POI_URL, params=params)
+            resp.raise_for_status()
+            pois = resp.json().get("searchPoiInfo", {}).get("pois", {}).get("poi", [])
+            for poi in pois:
+                try:
+                    poi_lat = float(poi.get("frontLat", 0))
+                    poi_lng = float(poi.get("frontLon", 0))
+                except (ValueError, TypeError):
+                    continue
+                if poi_lat == 0 or poi_lng == 0:
+                    continue
+                if _haversine_m(lat, lng, poi_lat, poi_lng) <= radius_m:
+                    return (poi_lat, poi_lng)
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            continue
+    return None
 
 
 
@@ -259,111 +266,160 @@ def _build_route_result(
     )
 
 
+def _best_ray_waypoint(
+    mid: Tuple[float, float],
+    prev_pt: Tuple[float, float],
+    next_pt: Tuple[float, float],
+    ray_length_m: float,
+    dest: Tuple[float, float],
+    sample_interval_m: float = 30.0,
+) -> Optional[Tuple[float, float]]:
+    """전방 180° 7개 방향으로 선 스캔, 피크가 안전 등급인 후보 중
+    목적지에 가장 가까운 지점을 반환합니다. 없으면 None."""
+    dlat_m = (next_pt[0] - prev_pt[0]) * 111_000
+    dlng_m = (next_pt[1] - prev_pt[1]) * 88_000
+    mag = math.sqrt(dlat_m ** 2 + dlng_m ** 2)
+    if mag == 0:
+        return None
+
+    # 진행방향 / 수직(왼쪽) 단위벡터
+    f_lat, f_lng = dlat_m / mag, dlng_m / mag
+    p_lat, p_lng = -f_lng, f_lat
+
+    angles = [math.radians(a) for a in [-90, -60, -30, 0, 30, 60, 90]]
+    num_samples = max(1, int(ray_length_m / sample_interval_m))
+    candidates: List[Tuple[float, float, float]] = []  # (dist_to_dest, lat, lng)
+
+    for theta in angles:
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+        dir_lat = cos_t * f_lat + sin_t * p_lat
+        dir_lng = cos_t * f_lng + sin_t * p_lng
+
+        pts = [
+            (mid[0] + dir_lat * (k * sample_interval_m) * LAT_PER_M,
+             mid[1] + dir_lng * (k * sample_interval_m) * LNG_PER_M)
+            for k in range(1, num_samples + 1)
+        ]
+        scores = [_score_for_coord(pt[0], pt[1])[0] for pt in pts]
+
+        # 증가→감소 전환점(피크) 탐색
+        peak_idx = len(scores) - 1
+        for j in range(len(scores) - 1):
+            if scores[j] >= scores[j + 1]:
+                peak_idx = j
+                break
+
+        if score_to_grade_realtime(scores[peak_idx]) == "안전":
+            dist = _straight_distance_m(pts[peak_idx][0], pts[peak_idx][1], dest[0], dest[1])
+            candidates.append((dist, pts[peak_idx][0], pts[peak_idx][1]))
+
+    if not candidates:
+        return None
+
+    # 목적지에 가장 가까운 후보 선택
+    candidates.sort(key=lambda c: c[0])
+    return (candidates[0][1], candidates[0][2])
+
+
+def _tmap_body(start: Tuple[float, float], end: Tuple[float, float]) -> dict:
+    return {
+        "startX": str(start[1]), "startY": str(start[0]),
+        "endX": str(end[1]), "endY": str(end[0]),
+        "reqCoordType": "WGS84GEO", "resCoordType": "WGS84GEO",
+        "startName": "출발", "endName": "도착",
+    }
+
+
 def _build_safe_route(
     req: RouteRequest,
     headers: dict,
     normal_coords: List[Tuple[float, float]],
     normal_duration_sec: int,
 ) -> Optional[RouteResult]:
-    """일반경로를 100m마다 점수 확인하며 보통/위험 격자에서 좌우 우회를 시도합니다.
+    """반복형 안전경로 탐색.
 
-    각 100m 샘플 지점마다:
-    - 안전 → 일반경로 그대로 통과
-    - 보통/위험 → 진행방향 수직 좌/우 100m 중 더 안전한 점 W 탐색
-      - W가 현재보다 점수 높으면 → 이전 점 → W → 다음 점 으로 TMAP 재호출해 교체
-      - W가 없거나 더 낮으면 → 그냥 통과
-    경유지는 개선이 있을 때만 추가되므로 불필요한 우회 최소화.
+    위험 구간 발견 시 전방 180° 레이더로 경유지 탐색 후 재라우팅.
+    경유지 도착 후 목적지까지 TMAP 재호출 반복 (최대 8회).
     """
-    sampled = _sample_coords(normal_coords, interval_m=100)
-    if len(sampled) < 2:
+    dest = (req.dest_lat, req.dest_lng)
+    all_coords: List[Tuple[float, float]] = []
+    current_coords = normal_coords
+
+    for _ in range(8):
+        sampled = _sample_coords(current_coords, interval_m=50)
+        if len(sampled) < 2:
+            all_coords.extend(current_coords[1:] if all_coords else current_coords)
+            break
+
+        scores_grades = [_score_for_coord(lat, lng) for lat, lng in sampled]
+
+        # 첫 보통/위험 인덱스 탐색
+        first_danger_idx = next(
+            (i for i, (_, g) in enumerate(scores_grades) if g != "안전"), None
+        )
+
+        if first_danger_idx is None:
+            all_coords.extend(current_coords[1:] if all_coords else current_coords)
+            break
+
+        # 안전 구간 → 위험 직전까지 current_coords 저장
+        if first_danger_idx > 0:
+            safe_end_pt = sampled[first_danger_idx - 1]
+            safe_nc_idx = min(
+                range(len(current_coords)),
+                key=lambda k: (current_coords[k][0] - safe_end_pt[0]) ** 2
+                              + (current_coords[k][1] - safe_end_pt[1]) ** 2,
+            )
+            slice_start = 1 if all_coords else 0
+            all_coords.extend(current_coords[slice_start:safe_nc_idx + 1])
+            from_pt = safe_end_pt
+        else:
+            from_pt = current_coords[0]
+
+        # 연속 위험 구간 길이
+        consecutive = sum(
+            1 for i in range(first_danger_idx, len(sampled))
+            if scores_grades[i][1] != "안전"
+        )
+        ray_length = max(200.0, consecutive * 50.0)
+
+        danger_pt = sampled[first_danger_idx]
+        prev_pt = sampled[first_danger_idx - 1] if first_danger_idx > 0 else from_pt
+        next_pt = sampled[min(first_danger_idx + 1, len(sampled) - 1)]
+        waypoint = _best_ray_waypoint(
+            danger_pt, prev_pt, next_pt, ray_length, dest
+        )
+
+        if waypoint is None:
+            # 개선 불가 → 나머지 그대로 추가 후 종료
+            if first_danger_idx > 0:
+                all_coords.extend(current_coords[safe_nc_idx + 1:])
+            else:
+                all_coords.extend(current_coords[1:] if all_coords else current_coords)
+            break
+
+        # from_pt → waypoint TMAP 경로 추가
+        wp_data = _call_tmap(headers, _tmap_body(from_pt, waypoint))
+        if wp_data:
+            wp_coords = _extract_tmap_coords(wp_data.get("features", []))
+            if wp_coords:
+                all_coords.extend(wp_coords[1:] if all_coords else wp_coords)
+
+        # waypoint → 목적지 새 경로로 다음 반복
+        next_data = _call_tmap(headers, _tmap_body(waypoint, dest))
+        if next_data is None:
+            break
+        next_coords = _extract_tmap_coords(next_data.get("features", []))
+        if not next_coords:
+            break
+        current_coords = next_coords
+
+    if not all_coords:
         return None
 
-    scores_grades = [_score_for_coord(lat, lng) for lat, lng in sampled]
+    all_coords = _remove_backtrack(all_coords)
 
-    # normal_coords에서 target과 가장 가까운 인덱스 찾기 (from_idx 이후)
-    def find_nc_idx(target: Tuple[float, float], from_idx: int = 0) -> int:
-        best, best_d = from_idx, float("inf")
-        for i in range(from_idx, len(normal_coords)):
-            d = (normal_coords[i][0] - target[0]) ** 2 + (normal_coords[i][1] - target[1]) ** 2
-            if d < best_d:
-                best_d, best = d, i
-        return best
-
-    final_coords: List[Tuple[float, float]] = []
-    nc_pos = 0
-    any_replaced = False
-
-    for i in range(1, len(sampled) - 1):
-        lat, lng = sampled[i]
-        score, grade = scores_grades[i]
-
-        # 현재 샘플 지점의 normal_coords 인덱스
-        curr_nc = find_nc_idx(sampled[i], nc_pos)
-
-        if grade == "안전":
-            # 안전 → 현재 지점까지 일반경로 그대로
-            final_coords.extend(normal_coords[nc_pos: curr_nc + 1])
-            nc_pos = curr_nc + 1
-            continue
-
-        # 보통/위험 → 진행방향 수직 좌/우 100m 탐색
-        prev_pt = sampled[i - 1]
-        next_pt = sampled[i + 1]
-        left, right = _perpendicular_candidates((lat, lng), prev_pt, next_pt, offset_m=100)
-        best_w = max([left, right], key=lambda c: _score_for_coord(c[0], c[1])[0])
-        best_w_score = _score_for_coord(best_w[0], best_w[1])[0]
-
-        if best_w_score <= score:
-            # 주변도 더 나은 곳 없음 → 그냥 통과
-            final_coords.extend(normal_coords[nc_pos: curr_nc + 1])
-            nc_pos = curr_nc + 1
-            continue
-
-        # W가 더 안전 → 이전 점(prev) → W → 현재 점(curr) TMAP 재호출
-        prev_nc = find_nc_idx(prev_pt, max(0, nc_pos - 1))
-
-        def _seg_body(start: Tuple[float, float], end: Tuple[float, float]) -> dict:
-            return {
-                "startX": str(start[1]), "startY": str(start[0]),
-                "endX": str(end[1]), "endY": str(end[0]),
-                "reqCoordType": "WGS84GEO", "resCoordType": "WGS84GEO",
-                "startName": "경유출발", "endName": "경유도착",
-            }
-
-        d1 = _call_tmap(headers, _seg_body(prev_pt, best_w))
-        d2 = _call_tmap(headers, _seg_body(best_w, (lat, lng)))
-
-        if d1 and d2:
-            f1, f2 = d1.get("features", []), d2.get("features", [])
-            c1 = _extract_tmap_coords(f1)
-            c2 = _extract_tmap_coords(f2)
-            if c1 and c2:
-                alt = c1 + c2[1:]
-                alt_sampled = _sample_coords(alt, interval_m=100)
-                if alt_sampled:
-                    alt_avg = sum(_score_for_coord(lt, lg)[0] for lt, lg in alt_sampled) / len(alt_sampled)
-                    if alt_avg > score:
-                        # prev까지 일반경로 + 대체 구간 추가
-                        final_coords.extend(normal_coords[nc_pos: prev_nc])
-                        final_coords.extend(alt)
-                        nc_pos = curr_nc + 1
-                        any_replaced = True
-                        continue
-
-        # TMAP 실패 또는 개선 없음 → 그냥 통과
-        final_coords.extend(normal_coords[nc_pos: curr_nc + 1])
-        nc_pos = curr_nc + 1
-
-    # 남은 경로 추가
-    final_coords.extend(normal_coords[nc_pos:])
-
-    if not final_coords:
-        return None
-
-    if any_replaced:
-        final_coords = _remove_backtrack(final_coords)
-
-    return _build_route_result("safe", final_coords, normal_duration_sec)
+    return _build_route_result("safe", all_coords, normal_duration_sec)
 
 
 def _fetch_direct_pedestrian(
