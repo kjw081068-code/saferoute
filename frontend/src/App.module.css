@@ -33,6 +33,27 @@
   margin: 0;
 }
 
+.brandTextCol {
+  flex: 1;
+  min-width: 0;
+}
+
+.brandActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mobileOnly {
+  display: none;
+}
+
+.desktopOnly {
+  display: block;
+}
+
 .logoMark {
   flex-shrink: 0;
   width: 44px;
@@ -260,6 +281,14 @@
   max-height: 220px;
   overflow-y: auto;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* body 포털: 상위 overflow:hidden에 잘리지 않도록 최상단 고정 레이어 */
+.suggestionListPortal {
+  position: fixed;
+  right: auto;
+  margin-top: 0;
+  z-index: 2147483000;
 }
 
 .suggestionItem {
@@ -645,41 +674,6 @@
   height: 100%;
 }
 
-.mapOverlay {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 16px;
-  pointer-events: none;
-}
-
-.mapPlaceholderInner {
-  text-align: center;
-  padding: 16px 20px;
-  border-radius: 14px;
-  background: rgba(26, 35, 50, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(6px);
-  max-width: min(420px, 92%);
-}
-
-.mapPlaceholderTitle {
-  font-weight: 900;
-  letter-spacing: -0.02em;
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.96);
-}
-
-.mapPlaceholderSubtitle {
-  margin-top: 6px;
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 13px;
-  line-height: 1.35;
-}
-
 .mapPanPad {
   position: absolute;
   right: 14px;
@@ -937,5 +931,424 @@
   line-height: 1.6;
   color: rgba(255, 255, 255, 0.92);
   font-weight: 500;
+}
+
+/* PC: 사이드바를 상단(폼)·하단(점수) 두 덩어리로 나눠도 한 컬럼처럼 쌓임 */
+.sidebarTop {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex-shrink: 0;
+}
+
+.sidebarBottom {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 모바일 전용 AI 시트 헤더 — 기본(PC)에서는 숨김 */
+.mobileAiSheetHeader {
+  display: none;
+}
+
+/* 모바일 지도 좌측 하단 AI 토글(기본은 숨김) */
+.mobileAiMapStack {
+  display: none;
+}
+
+/* --- 모바일 전용 (768px 이하). PC(769px~)는 기본 그리드·스타일 유지 --- */
+@media (max-width: 768px) {
+  :root {
+    /* 하단(안전/일반 경로) 시트 높이 — 지도 일부 침범하되 과하지 않게 */
+    --mobileBottomSheetH: clamp(180px, 28dvh, 300px);
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    width: 100vw;
+    /* 상단·지도·하단만 쓰고 페이지 전체 스크롤 방지 */
+    overflow: hidden;
+  }
+
+  /* 자식(sidebarTop, mapArea, sidebarBottom)이 .app의 flex 아이템이 되도록 */
+  .sidebar {
+    display: contents;
+    width: auto;
+    max-width: none;
+    height: auto;
+    min-height: 0;
+    border-right: none;
+    padding: 0;
+    overflow: visible;
+    gap: 0;
+    background: transparent;
+  }
+
+  .sidebarTop {
+    order: 1;
+    /* 시안: 상단 검색·레이어는 독립 블록 — 높이는 내용만큼, 내부 세로 스크롤 없음 */
+    flex: 0 0 auto;
+    flex-shrink: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: visible;
+    gap: 8px;
+    padding: 8px 10px 8px;
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    background: #1a2332;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
+    z-index: 5;
+  }
+
+  .brandBlock {
+    gap: 8px;
+    align-items: center;
+  }
+
+  .mobileOnly {
+    display: flex;
+  }
+
+  .desktopOnly {
+    display: none;
+  }
+
+  .brandActions .currentLocationBtnRow {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .brandActions .currentLocationBtn {
+    padding: 5px 8px;
+    font-size: 10px;
+    border-radius: 10px;
+  }
+
+  .logoMark {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+  }
+
+  .appName {
+    font-size: 16px;
+  }
+
+  .appTagline {
+    font-size: 11px;
+    margin-top: 2px;
+    line-height: 1.3;
+  }
+
+  /* 출발지·도착지 한 줄 + 우측 액션 버튼 */
+  .form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
+    gap: 4px 6px;
+    align-items: stretch;
+  }
+
+  .form > .fieldBlock:nth-of-type(1) {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    gap: 3px;
+  }
+
+  .form > .fieldBlock:nth-of-type(2) {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    gap: 3px;
+  }
+
+  .form > .fieldBlock:nth-of-type(1) .inputRow,
+  .form > .fieldBlock:nth-of-type(2) .inputRow {
+    width: 100%;
+  }
+
+  .form > .fieldBlock:nth-of-type(1) .locationColumn,
+  .form > .fieldBlock:nth-of-type(2) .locationColumn {
+    min-width: 0;
+  }
+
+  .form > .primaryButton {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: stretch;
+    height: auto;
+    min-height: 0;
+    margin-top: 0;
+    padding: 4px 4px;
+    border-radius: 12px;
+    font-size: 9px;
+    line-height: 1.2;
+    letter-spacing: -0.05em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+  }
+
+  .form > .safeRouteFootnote {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin: 0;
+    padding: 0 2px;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .form > .fieldBlock .label {
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .fieldHint {
+    display: none;
+  }
+
+  .currentLocationRow {
+    margin: 0 0 4px;
+  }
+
+  .currentLocationBtn {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+
+  .currentLocationBtnRow {
+    flex-wrap: wrap;
+  }
+
+  .fieldBlock {
+    gap: 4px;
+  }
+
+  .label {
+    font-size: 11px;
+  }
+
+  .input {
+    height: 34px;
+    font-size: 11px;
+    padding: 0 8px;
+    border-radius: 8px;
+  }
+
+  .mapArea {
+    order: 2;
+    /* 상단·하단 고정 높이 제외 전부 지도 — 강제 min-height 없음(레이아웃 깨짐 방지) */
+    flex: 1 1 0;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    /* 하단 시트가 fixed로 올라오므로 지도도 그만큼 공간 확보 */
+    padding-bottom: var(--mobileBottomSheetH);
+  }
+
+  .desktopOnlyMapStack {
+    display: none !important;
+  }
+
+  .mobileAiMapStack {
+    display: flex;
+    position: absolute;
+    left: 12px;
+    bottom: calc(12px + var(--mobileBottomSheetH));
+    z-index: 12;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    max-width: min(360px, calc(100vw - 24px));
+    pointer-events: auto;
+  }
+
+  .mobileAiMapToggle {
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(26, 35, 50, 0.78);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+  }
+
+  .mobileAiMapPanel {
+    width: min(360px, calc(100vw - 24px));
+  }
+
+  .mobileAiMapPanelTopBar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 6px;
+  }
+
+  .mobileAiMapClose {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(26, 35, 50, 0.78);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+  }
+
+  .mobileAiMapPanel .aiDescBox {
+    max-width: none;
+  }
+
+  /* 레이어 토글: 지도 위, 한 줄(가로 스크롤), 패널은 투명 / 버튼만 반투명 */
+  .layerTogglePanel {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-start;
+    max-width: calc(100% - 20px);
+    gap: 6px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    border: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    z-index: 11;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .layerTogglePanel .layerToggleBtn {
+    padding: 4px 8px;
+    font-size: 10px;
+    gap: 4px;
+    border-radius: 999px;
+    border-width: 1px;
+    backdrop-filter: blur(10px);
+  }
+
+  /* 버튼 자체를 반투명하게(지도 보이게) */
+  .layerToggleBtnCctv,
+  .layerToggleBtnLight,
+  .layerToggleBtnSafelight,
+  .layerToggleBtnEnt,
+  .layerToggleBtnConv,
+  .layerToggleBtnPolice {
+    opacity: 0.78;
+  }
+
+  .layerToggleBtnOff {
+    opacity: 0.62;
+  }
+
+  /* 시간: 지도 우측하단 */
+  .topRightClock {
+    top: auto;
+    right: 12px;
+    bottom: calc(12px + var(--mobileBottomSheetH));
+    z-index: 12;
+  }
+
+  .mapPanPad {
+    display: none !important;
+  }
+
+  /* 하단 시트: 경로 점수 + 클릭 안전도 — 시안 비율(얇은 하단) */
+  .sidebarBottom {
+    order: 3;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    height: var(--mobileBottomSheetH);
+    overflow-y: auto;
+    overflow-x: hidden;
+    gap: 10px;
+    padding: 10px 10px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: #141c28;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-top-left-radius: 18px;
+    border-top-right-radius: 18px;
+    box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  /* 모바일: 하단에는 안전/일반 경로만 — 지도 클릭 지점 안전도 패널 숨김 */
+  .sidebarBottom .safetyPanel {
+    display: none !important;
+  }
+
+  .mobileAiSheetHeader {
+    display: block;
+  }
+
+  .mobileAiToggleRow {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    min-height: 28px;
+    margin-bottom: 4px;
+  }
+
+  .mobileAiToggle {
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(26, 35, 50, 0.95);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  }
+
+  .mobileAiPanelWrap {
+    margin-top: 0;
+  }
+
+  .mobileAiPanelWrap .aiDescBox {
+    max-width: none;
+  }
+
+  /* 하단 시트 안에서는 경로 영역 높이 제한 해제(시트 전체 스크롤) */
+  .routeSection {
+    max-height: none;
+    overflow: visible;
+    flex: 0 1 auto;
+    min-height: 0;
+  }
+
+  .emptyState {
+    min-height: 72px;
+    padding: 12px 10px;
+    font-size: 12px;
+  }
+
+  .routeCard {
+    padding: 10px 12px 8px;
+  }
+
+  .safetyPanel {
+    padding: 10px 12px;
+    gap: 8px;
+  }
 }
 

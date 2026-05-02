@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { createPortal } from 'react-dom';
 import styles from './App.module.css';
 
 const SILLIM_STATION = { lat: 37.5030778, lng: 126.9477711 }; // 상도역 7호선
@@ -409,6 +410,61 @@ function showAllRoutePolylinesOnMap(
   });
 }
 
+type AiSafetyPanelProps = {
+  aiDescription: AiDescription | null;
+  aiDescriptionLoading: boolean;
+  onRequest: () => void;
+};
+
+/** AI 경로 분석 UI — PC 지도 좌하단과 모바일 하단 시트에서 공통 사용 */
+function AiSafetyPanel({ aiDescription, aiDescriptionLoading, onRequest }: AiSafetyPanelProps) {
+  return (
+    <section className={styles.aiDescBox} aria-label="AI 안전 안내">
+      <div className={styles.aiDescLabel}>🤖 AI 안전 안내</div>
+      {aiDescriptionLoading ? (
+        <div className={styles.aiDescLoading}>
+          <span className={styles.geoSpinner} aria-hidden /> 경로 분석 중…
+        </div>
+      ) : aiDescription ? (
+        <div className={styles.aiDescContent}>
+          {aiDescription.safe_points.length > 0 && (
+            <div className={styles.aiDescSection}>
+              <div className={styles.aiDescSectionTitle}>🟢 안전 포인트</div>
+              <ul className={styles.aiDescList}>
+                {aiDescription.safe_points.map((pt, i) => (
+                  <li key={i} className={styles.aiDescListItem}>
+                    {pt}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {aiDescription.warning_points.length > 0 && (
+            <div className={styles.aiDescSection}>
+              <div className={styles.aiDescSectionTitle}>🔴 주의 포인트</div>
+              <ul className={styles.aiDescList}>
+                {aiDescription.warning_points.map((pt, i) => (
+                  <li key={i} className={styles.aiDescListItem}>
+                    {pt}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className={styles.aiDescSummaryBox}>
+            <span className={styles.aiDescSummaryIcon}>🚨</span>
+            <p className={styles.aiDescSummaryText}>{aiDescription.ai_summary}</p>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className={styles.aiDescBtn} onClick={onRequest}>
+          AI 경로 분석하기
+        </button>
+      )}
+    </section>
+  );
+}
+
 function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<KakaoMap | null>(null);
@@ -465,6 +521,12 @@ function App() {
   // 현재 suggestions가 어떤 쿼리에 대한 결과인지 추적
   const originSuggestionsQueryRef = useRef('');
   const destSuggestionsQueryRef = useRef('');
+  /** 추천 목록을 body에 포털할 때 입력칸 기준 고정 위치 */
+  type SearchSuggestAnchor = { top: number; left: number; width: number };
+  const originSearchInputRef = useRef<HTMLInputElement>(null);
+  const destSearchInputRef = useRef<HTMLInputElement>(null);
+  const [originSuggestAnchor, setOriginSuggestAnchor] = useState<SearchSuggestAnchor | null>(null);
+  const [destSuggestAnchor, setDestSuggestAnchor] = useState<SearchSuggestAnchor | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedRouteId, setSelectedRouteId] = useState<RouteId>('safe');
@@ -480,6 +542,8 @@ function App() {
   const [originTrackingLoading, setOriginTrackingLoading] = useState(false);
   const [aiDescription, setAiDescription] = useState<AiDescription | null>(null);
   const [aiDescriptionLoading, setAiDescriptionLoading] = useState(false);
+  /** 모바일 하단 시트에서 AI 패널 펼침 여부 */
+  const [mobileAiSheetOpen, setMobileAiSheetOpen] = useState(false);
 
   const safetyFetchHandlerRef = useRef<(lat: number, lng: number) => void>(() => {});
 
@@ -527,6 +591,42 @@ function App() {
     }, 50);
     return () => clearTimeout(timer);
   }, [destQuery]);
+
+  const refreshSearchSuggestAnchors = useCallback(() => {
+    if (activeSearchInput === 'origin' && originSuggestions.length > 0 && originSearchInputRef.current) {
+      const r = originSearchInputRef.current.getBoundingClientRect();
+      setOriginSuggestAnchor({ top: r.bottom + 4, left: r.left, width: r.width });
+    } else {
+      setOriginSuggestAnchor(null);
+    }
+    if (activeSearchInput === 'destination' && destSuggestions.length > 0 && destSearchInputRef.current) {
+      const r = destSearchInputRef.current.getBoundingClientRect();
+      setDestSuggestAnchor({ top: r.bottom + 4, left: r.left, width: r.width });
+    } else {
+      setDestSuggestAnchor(null);
+    }
+  }, [activeSearchInput, originSuggestions, destSuggestions]);
+
+  useLayoutEffect(() => {
+    refreshSearchSuggestAnchors();
+  }, [refreshSearchSuggestAnchors]);
+
+  useEffect(() => {
+    const schedule = () => {
+      requestAnimationFrame(refreshSearchSuggestAnchors);
+    };
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', schedule);
+    vv?.addEventListener('scroll', schedule);
+    return () => {
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+      vv?.removeEventListener('resize', schedule);
+      vv?.removeEventListener('scroll', schedule);
+    };
+  }, [refreshSearchSuggestAnchors]);
 
   const handleSearchFocus = (target: 'origin' | 'destination') => {
     if (searchBlurTimerRef.current) clearTimeout(searchBlurTimerRef.current);
@@ -817,6 +917,11 @@ function App() {
   // 경로가 바뀌면 이전 AI 결과 초기화
   useEffect(() => {
     setAiDescription(null);
+  }, [routeApiResults, selectedRouteId]);
+
+  // 경로·선택이 바뀌면 모바일 AI 시트는 닫음
+  useEffect(() => {
+    setMobileAiSheetOpen(false);
   }, [routeApiResults, selectedRouteId]);
 
   const handleRequestAiDescription = () => {
@@ -1392,11 +1497,54 @@ function App() {
   return (
     <div className={styles.app}>
       <aside className={styles.sidebar}>
+        <div className={styles.sidebarTop}>
         <header className={styles.brandBlock}>
           <img src="/logo.jpg" alt="로고" className={styles.logoMark} />
-          <div>
+          <div className={styles.brandTextCol}>
             <h1 className={styles.appName}>보통의하루</h1>
             <p className={styles.appTagline}>안심 귀갓길 내비게이터</p>
+          </div>
+          <div className={`${styles.brandActions} ${styles.mobileOnly}`}>
+            <div className={styles.currentLocationBtnRow}>
+              <button
+                type="button"
+                className={styles.currentLocationBtn}
+                onClick={handleUseCurrentLocation}
+                disabled={originGeolocationLoading || originTrackingActive || originTrackingLoading}
+                aria-busy={originGeolocationLoading}
+                aria-label="현재 위치로 출발지 설정"
+              >
+                {originGeolocationLoading ? (
+                  <span className={styles.geoSpinner} aria-hidden />
+                ) : (
+                  <span aria-hidden>📍</span>
+                )}
+                현재 위치
+              </button>
+              <button
+                type="button"
+                className={`${styles.currentLocationBtn} ${styles.currentLocationBtnTrack} ${
+                  originTrackingActive ? styles.currentLocationBtnTrackOn : ''
+                }`}
+                onClick={handleToggleOriginTracking}
+                disabled={originTrackingLoading && !originTrackingActive}
+                aria-busy={originTrackingLoading && !originTrackingActive}
+                aria-pressed={originTrackingActive}
+                aria-label={originTrackingActive ? '실시간 위치 추적 중지' : '실시간 위치 추적 시작'}
+              >
+                {originTrackingLoading && !originTrackingActive ? (
+                  <span className={styles.geoSpinner} aria-hidden />
+                ) : (
+                  <span aria-hidden>{originTrackingActive ? '⏹' : '📡'}</span>
+                )}
+                {originTrackingActive ? '추적 중지' : '실시간 추적'}
+              </button>
+            </div>
+            {originGeolocationError ? (
+              <div className={styles.currentLocationError} role="status" aria-live="polite">
+                {originGeolocationError}
+              </div>
+            ) : null}
           </div>
         </header>
 
@@ -1406,7 +1554,7 @@ function App() {
               출발지
             </div>
             {/* 검색 제안 목록(z-index 높음)에 가리지 않도록 GPS 버튼을 검색창 위에 둠 */}
-            <div className={styles.currentLocationRow}>
+            <div className={`${styles.currentLocationRow} ${styles.desktopOnly}`}>
               <div className={styles.currentLocationBtnRow}>
                 <button
                   type="button"
@@ -1467,6 +1615,7 @@ function App() {
                 )}
                 <div className={styles.inputWrap}>
                   <input
+                    ref={originSearchInputRef}
                     id="origin-search"
                     aria-label="출발지 검색"
                     className={`${styles.input} ${styles.inputPlace} ${
@@ -1480,20 +1629,6 @@ function App() {
                     placeholder="장소, 건물명, 주소로 검색"
                     autoComplete="off"
                   />
-                  {activeSearchInput === 'origin' && originSuggestions.length > 0 && (
-                    <ul className={styles.suggestionList}>
-                      {originSuggestions.map((poi, i) => (
-                        <li
-                          key={i}
-                          className={styles.suggestionItem}
-                          onMouseDown={() => handleSelectPoi('origin', poi)}
-                        >
-                          <span className={styles.suggestionName}>{poi.name}</span>
-                          <span className={styles.suggestionAddr}>{poi.address}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
                 </div>
               </div>
               <span className={styles.fieldHint}>지도를 클릭해서 설정하세요</span>
@@ -1525,6 +1660,7 @@ function App() {
                 )}
                 <div className={styles.inputWrap}>
                   <input
+                    ref={destSearchInputRef}
                     id="destination-search"
                     aria-label="도착지 검색"
                     className={`${styles.input} ${styles.inputPlace} ${
@@ -1538,20 +1674,6 @@ function App() {
                     placeholder="장소, 건물명, 주소로 검색"
                     autoComplete="off"
                   />
-                  {activeSearchInput === 'destination' && destSuggestions.length > 0 && (
-                    <ul className={styles.suggestionList}>
-                      {destSuggestions.map((poi, i) => (
-                        <li
-                          key={i}
-                          className={styles.suggestionItem}
-                          onMouseDown={() => handleSelectPoi('destination', poi)}
-                        >
-                          <span className={styles.suggestionName}>{poi.name}</span>
-                          <span className={styles.suggestionAddr}>{poi.address}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
                 </div>
               </div>
               <span className={styles.fieldHint}>지도를 클릭해서 설정하세요</span>
@@ -1566,9 +1688,10 @@ function App() {
           >
             {routeFetchLoading ? '경로 찾는 중…' : '안전 경로 찾기'}
           </button>
-          <p className={styles.safeRouteFootnote}>*안전경로는 3km까지만 표시됩니다.</p>
+        </div>
         </div>
 
+        <div className={styles.sidebarBottom}>
         <section className={styles.routeSection} aria-label="경로 비교">
           {!hasSearched ? (
             <div className={styles.emptyState}>
@@ -1664,50 +1787,50 @@ function App() {
             <div className={styles.safetyPanelMuted}>지도를 클릭하면 이 위치의 안전 점수를 불러옵니다.</div>
           )}
         </section>
+        </div>
       </aside>
 
       <main className={styles.mapArea}>
         {selectedRoute && (
-          <div className={styles.mapBottomLeftStack} aria-live="polite">
-            <section className={styles.aiDescBox} aria-label="AI 안전 안내">
-              <div className={styles.aiDescLabel}>🤖 AI 안전 안내</div>
-              {aiDescriptionLoading ? (
-                <div className={styles.aiDescLoading}>
-                  <span className={styles.geoSpinner} aria-hidden /> 경로 분석 중…
+          <div className={`${styles.mapBottomLeftStack} ${styles.desktopOnlyMapStack}`} aria-live="polite">
+            <AiSafetyPanel
+              aiDescription={aiDescription}
+              aiDescriptionLoading={aiDescriptionLoading}
+              onRequest={handleRequestAiDescription}
+            />
+          </div>
+        )}
+
+        {selectedRoute && (
+          <div className={styles.mobileAiMapStack} aria-live="polite">
+            <button
+              type="button"
+              className={styles.mobileAiMapToggle}
+              onClick={() => setMobileAiSheetOpen((v) => !v)}
+              aria-expanded={mobileAiSheetOpen}
+              aria-controls="mobile-ai-map-panel"
+            >
+              🤖 AI
+            </button>
+            {mobileAiSheetOpen ? (
+              <div id="mobile-ai-map-panel" className={styles.mobileAiMapPanel}>
+                <div className={styles.mobileAiMapPanelTopBar}>
+                  <button
+                    type="button"
+                    className={styles.mobileAiMapClose}
+                    onClick={() => setMobileAiSheetOpen(false)}
+                    aria-label="AI 분석 리포트 닫기"
+                  >
+                    ×
+                  </button>
                 </div>
-              ) : aiDescription ? (
-                <div className={styles.aiDescContent}>
-                  {aiDescription.safe_points.length > 0 && (
-                    <div className={styles.aiDescSection}>
-                      <div className={styles.aiDescSectionTitle}>🟢 안전 포인트</div>
-                      <ul className={styles.aiDescList}>
-                        {aiDescription.safe_points.map((pt, i) => (
-                          <li key={i} className={styles.aiDescListItem}>{pt}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {aiDescription.warning_points.length > 0 && (
-                    <div className={styles.aiDescSection}>
-                      <div className={styles.aiDescSectionTitle}>🔴 주의 포인트</div>
-                      <ul className={styles.aiDescList}>
-                        {aiDescription.warning_points.map((pt, i) => (
-                          <li key={i} className={styles.aiDescListItem}>{pt}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  <div className={styles.aiDescSummaryBox}>
-                    <span className={styles.aiDescSummaryIcon}>🚨</span>
-                    <p className={styles.aiDescSummaryText}>{aiDescription.ai_summary}</p>
-                  </div>
-                </div>
-              ) : (
-                <button className={styles.aiDescBtn} onClick={handleRequestAiDescription}>
-                  AI 경로 분석하기
-                </button>
-              )}
-            </section>
+                <AiSafetyPanel
+                  aiDescription={aiDescription}
+                  aiDescriptionLoading={aiDescriptionLoading}
+                  onRequest={handleRequestAiDescription}
+                />
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -1770,19 +1893,6 @@ function App() {
               🚔 경찰서
             </button>
           </div>
-          <div className={styles.mapOverlay} aria-hidden>
-            <div className={styles.mapPlaceholderInner}>
-              <div className={styles.mapPlaceholderTitle}>카카오맵</div>
-              <div className={styles.mapPlaceholderSubtitle}>
-                {mapPickTarget === 'origin' && '출발지: 지도에서 위치를 선택하세요'}
-                {mapPickTarget === 'destination' && '도착지: 지도에서 위치를 선택하세요'}
-                {!mapPickTarget &&
-                  (hasLocationValue(origin) && hasLocationValue(destination)
-                    ? `${formatLocationLabel(origin)} → ${formatLocationLabel(destination)}`
-                    : '출발지 · 도착지를 입력하거나 지도에서 선택하세요')}
-              </div>
-            </div>
-          </div>
 
           <div className={styles.mapPanPad} role="group" aria-label="지도 이동">
             <span className={styles.mapPanCell} aria-hidden />
@@ -1825,6 +1935,54 @@ function App() {
           </div>
         </div>
       </main>
+      {originSuggestAnchor && activeSearchInput === 'origin' && originSuggestions.length > 0
+        ? createPortal(
+            <ul
+              className={`${styles.suggestionList} ${styles.suggestionListPortal}`}
+              style={{
+                top: originSuggestAnchor.top,
+                left: originSuggestAnchor.left,
+                width: originSuggestAnchor.width,
+              }}
+            >
+              {originSuggestions.map((poi, i) => (
+                <li
+                  key={i}
+                  className={styles.suggestionItem}
+                  onMouseDown={() => handleSelectPoi('origin', poi)}
+                >
+                  <span className={styles.suggestionName}>{poi.name}</span>
+                  <span className={styles.suggestionAddr}>{poi.address}</span>
+                </li>
+              ))}
+            </ul>,
+            document.body
+          )
+        : null}
+      {destSuggestAnchor && activeSearchInput === 'destination' && destSuggestions.length > 0
+        ? createPortal(
+            <ul
+              className={`${styles.suggestionList} ${styles.suggestionListPortal}`}
+              style={{
+                top: destSuggestAnchor.top,
+                left: destSuggestAnchor.left,
+                width: destSuggestAnchor.width,
+              }}
+            >
+              {destSuggestions.map((poi, i) => (
+                <li
+                  key={i}
+                  className={styles.suggestionItem}
+                  onMouseDown={() => handleSelectPoi('destination', poi)}
+                >
+                  <span className={styles.suggestionName}>{poi.name}</span>
+                  <span className={styles.suggestionAddr}>{poi.address}</span>
+                </li>
+              ))}
+            </ul>,
+            document.body
+          )
+        : null}
     </div>
   );
 }
