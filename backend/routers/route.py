@@ -10,7 +10,8 @@ from routers.safety import (
     _cctv_score_for_coord, _safelight_score_for_coord,
     _streetlight_score_for_coord,
     _combined_conv_open24_score_for_coord,
-    _police_score_for_coord, _entertainment_score_for_coord,
+    _police_score_for_coord, _firestation_score_for_coord,
+    _entertainment_score_for_coord,
     score_to_grade_realtime,
 )
 
@@ -18,7 +19,7 @@ router = APIRouter()
 
 TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
 TMAP_POI_URL = "https://apis.openapi.sk.com/tmap/pois"
-SAMPLE_INTERVAL_M = 100       # 안전점수 샘플링 간격 (미터)
+SAMPLE_INTERVAL_M = 50        # 안전점수 샘플링 간격 (미터)
 
 # 서울 기준 좌표-거리 변환 상수
 LAT_PER_M = 1 / 111_000
@@ -124,9 +125,10 @@ def _score_for_coord(lat: float, lng: float) -> Tuple[float, str]:
     score = (
         _cctv_score_for_coord(lat, lng)
         + _streetlight_score_for_coord(lat, lng)
-        + _safelight_score_for_coord(lat, lng, radius_m=5.0)
+        + _safelight_score_for_coord(lat, lng, radius_m=10.0)
         + _combined_conv_open24_score_for_coord(lat, lng)
         + _police_score_for_coord(lat, lng)
+        + _firestation_score_for_coord(lat, lng)
         - _entertainment_score_for_coord(lat, lng)
     )
     return score, score_to_grade_realtime(score)
@@ -149,7 +151,7 @@ def _score_to_grade(segments: list) -> str:
 
 def _remove_backtrack(
     coords: List[Tuple[float, float]],
-    proximity_m: float = 20.0,
+    proximity_m: float = 10.0,
 ) -> List[Tuple[float, float]]:
     """경로에서 같은 위치를 두 번 지나는 루프 구간을 제거합니다.
 
@@ -344,7 +346,8 @@ def _build_safe_route(
     all_coords: List[Tuple[float, float]] = []
     current_coords = normal_coords
 
-    for _ in range(8):
+    while True:
+        safe_nc_idx = 0  # 매 이터레이션마다 초기화 (이전 루프 값 오염 방지)
         sampled = _sample_coords(current_coords, interval_m=50)
         if len(sampled) < 2:
             all_coords.extend(current_coords[1:] if all_coords else current_coords)
@@ -374,6 +377,8 @@ def _build_safe_route(
             from_pt = safe_end_pt
         else:
             from_pt = current_coords[0]
+            if not all_coords:
+                all_coords.append(from_pt)
 
         # 연속 위험 구간 길이
         consecutive = sum(
@@ -399,24 +404,57 @@ def _build_safe_route(
 
         # from_pt → waypoint TMAP 경로 추가
         wp_data = _call_tmap(headers, _tmap_body(from_pt, waypoint))
-        if wp_data:
-            wp_coords = _extract_tmap_coords(wp_data.get("features", []))
-            if wp_coords:
-                all_coords.extend(wp_coords[1:] if all_coords else wp_coords)
+        if not wp_data:
+            # TMAP 실패 → 안전구간까지만 저장하고 종료
+            all_coords.extend(current_coords[safe_nc_idx + 1:] if first_danger_idx > 0 else current_coords[1:])
+            break
+        wp_coords = _extract_tmap_coords(wp_data.get("features", []))
+        if not wp_coords:
+            all_coords.extend(current_coords[safe_nc_idx + 1:] if first_danger_idx > 0 else current_coords[1:])
+            break
+        # wp_coords가 1개짜리면 [1:]이 빈 리스트 → waypoint 좌표 직접 추가
+        if len(wp_coords) == 1:
+            if not all_coords or all_coords[-1] != wp_coords[0]:
+                all_coords.append(wp_coords[0])
+        else:
+            all_coords.extend(wp_coords[1:] if all_coords else wp_coords)
 
         # waypoint → 목적지 새 경로로 다음 반복
         next_data = _call_tmap(headers, _tmap_body(waypoint, dest))
         if next_data is None:
+            # TMAP 실패 → 이전 경로(current_coords)를 waypoint 근처부터 이어붙임
+            nc_idx = min(
+                range(len(current_coords)),
+                key=lambda k: _haversine_m(
+                    current_coords[k][0], current_coords[k][1],
+                    waypoint[0], waypoint[1],
+                ),
+            )
+            if _haversine_m(current_coords[nc_idx][0], current_coords[nc_idx][1],
+                            waypoint[0], waypoint[1]) < 300:
+                all_coords.extend(current_coords[nc_idx + 1:])
+            else:
+                all_coords.append(dest)
             break
         next_coords = _extract_tmap_coords(next_data.get("features", []))
         if not next_coords:
+            all_coords.append(dest)
             break
         current_coords = next_coords
 
     if not all_coords:
         return None
 
-    all_coords = _remove_backtrack(all_coords)
+    # 루프 종료 후 목적지 도달 여부 체크 (8회 한도 소진 또는 중간 break로 누락된 경우)
+    last_pt = all_coords[-1]
+    if _haversine_m(last_pt[0], last_pt[1], dest[0], dest[1]) > 100 and current_coords:
+        if _haversine_m(last_pt[0], last_pt[1],
+                        current_coords[0][0], current_coords[0][1]) < 100:
+            all_coords.extend(current_coords[1:])
+        else:
+            all_coords.append(dest)
+
+    all_coords = _remove_backtrack(all_coords, proximity_m=10.0)
 
     return _build_route_result("safe", all_coords, normal_duration_sec)
 

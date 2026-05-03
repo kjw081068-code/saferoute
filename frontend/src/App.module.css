@@ -785,6 +785,12 @@
   color: #fff;
 }
 
+.layerToggleBtnFirestation {
+  background: rgba(239, 68, 68, 0.85);
+  border-color: #dc2626;
+  color: #fff;
+}
+
 .layerToggleBtnOff {
   background: rgba(40, 40, 40, 0.75);
   border-color: rgba(255, 255, 255, 0.15);
@@ -1258,7 +1264,8 @@
   .layerToggleBtnEnt,
   .layerToggleBtnConv,
   .layerToggleBtnPolice,
-  .layerToggleBtnOpen24 {
+  .layerToggleBtnOpen24,
+  .layerToggleBtnFirestation {
     opacity: 0.78;
   }
 

@@ -42,7 +42,7 @@ function clusterCountText(count: number): string {
 }
 
 /** CCTV=파랑, 가로등=주황, 유흥업소=빨강 계열 — 클러스터 원만으로 구분 */
-function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertainment' | 'convenience' | 'police' | 'open24'): Array<Record<string, string>> {
+function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertainment' | 'convenience' | 'police' | 'open24' | 'firestation'): Array<Record<string, string>> {
   const fills: [string, string, string, string, string] =
     kind === 'cctv'
       ? [
@@ -91,6 +91,14 @@ function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertai
           'rgba(25, 25, 25, 0.95)',
           'rgba(10, 10, 10, 0.96)',
           'rgba(0, 0, 0, 0.97)',
+        ]
+      : kind === 'firestation'
+      ? [
+          'rgba(239, 68, 68, 0.9)',
+          'rgba(220, 38, 38, 0.92)',
+          'rgba(185, 28, 28, 0.94)',
+          'rgba(153, 27, 27, 0.95)',
+          'rgba(127, 29, 29, 0.96)',
         ]
       : [
           'rgba(103, 232, 249, 0.92)',
@@ -519,6 +527,7 @@ function App() {
   const entClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const convClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const policeClustererRef = useRef<KakaoMarkerClusterer | null>(null);
+  const firestationClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const cctvMarkersRef = useRef<KakaoMarker[]>([]);
   const lightMarkersRef = useRef<KakaoMarker[]>([]);
   const safelightMarkersRef = useRef<KakaoMarker[]>([]);
@@ -526,6 +535,7 @@ function App() {
   const convMarkersRef = useRef<KakaoMarker[]>([]);
   const policeMarkersRef = useRef<KakaoMarker[]>([]);
   const open24MarkersRef = useRef<KakaoMarker[]>([]);
+  const firestationMarkersRef = useRef<KakaoMarker[]>([]);
   const open24ClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const showCctvRef = useRef(false);
   const showStreetlightRef = useRef(false);
@@ -534,6 +544,7 @@ function App() {
   const showConvRef = useRef(false);
   const showPoliceRef = useRef(false);
   const showOpen24Ref = useRef(false);
+  const showFirestationRef = useRef(false);
   const geocoderRef = useRef<Geocoder | null>(null);
   const originCoordRef = useRef<{ lat: number; lng: number } | null>(null);
   /** `watchPosition` 반환 id — 언마운트·중지 시 clearWatch */
@@ -553,6 +564,7 @@ function App() {
   const [showConv, setShowConv] = useState(false);
   const [showPolice, setShowPolice] = useState(false);
   const [showOpen24, setShowOpen24] = useState(false);
+  const [showFirestation, setShowFirestation] = useState(false);
   const [origin, setOrigin] = useState<LocationField>(emptyLocation);
   const [destination, setDestination] = useState<LocationField>(emptyLocation);
   const [originQuery, setOriginQuery] = useState('');
@@ -690,6 +702,7 @@ function App() {
   showConvRef.current = showConv;
   showPoliceRef.current = showPolice;
   showOpen24Ref.current = showOpen24;
+  showFirestationRef.current = showFirestation;
 
   safetyFetchHandlerRef.current = (lat: number, lng: number) => {
     void (async () => {
@@ -1152,6 +1165,11 @@ function App() {
           new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
           { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
         );
+        const firestationIcon = new kakao.maps.MarkerImage(
+          `${base}/markers/firestation-dot.svg`,
+          new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+          { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
+        );
         const open24Icon = new kakao.maps.MarkerImage(
           `${base}/markers/open24-dot.svg`,
           new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
@@ -1171,6 +1189,7 @@ function App() {
               convenience: { lat: number; lng: number }[];
               police: { lat: number; lng: number }[];
               open24: { lat: number; lng: number }[];
+              firestation: { lat: number; lng: number }[];
             };
 
             const ClustererCtor = kakao.maps.MarkerClusterer;
@@ -1239,6 +1258,15 @@ function App() {
             );
             open24MarkersRef.current = open24Markers;
 
+            const firestationMarkers = (data.firestation ?? []).map(
+              (pt) =>
+                new kakao.maps.Marker({
+                  position: new kakao.maps.LatLng(pt.lat, pt.lng),
+                  image: firestationIcon,
+                })
+            );
+            firestationMarkersRef.current = firestationMarkers;
+
             const mapNow = mapInstanceRef.current;
             /** 1 = 모든 줌에서 클러스터 활성(레벨↑ 축소할 때만 켜지던 현상 제거) */
             const clusterMinLevel = 1;
@@ -1305,6 +1333,15 @@ function App() {
               texts: clusterCountText,
               styles: clusterStylesFor('open24'),
             });
+            const firestationCluster = new ClustererCtor({
+              map: null,
+              averageCenter: true,
+              minLevel: clusterMinLevel,
+              minClusterSize: 1,
+              calculator: CLUSTER_CALCULATOR,
+              texts: clusterCountText,
+              styles: clusterStylesFor('firestation'),
+            });
             cctvClustererRef.current = cctvCluster;
             lightClustererRef.current = lightCluster;
             safelightClustererRef.current = safelightCluster;
@@ -1312,6 +1349,7 @@ function App() {
             convClustererRef.current = convCluster;
             policeClustererRef.current = policeCluster;
             open24ClustererRef.current = open24Cluster;
+            firestationClustererRef.current = firestationCluster;
 
             if (mapNow) {
               if (showCctvRef.current) {
@@ -1342,6 +1380,10 @@ function App() {
                 open24Cluster.addMarkers(open24Markers);
                 open24Cluster.setMap(mapNow);
               }
+              if (showFirestationRef.current) {
+                firestationCluster.addMarkers(firestationMarkers);
+                firestationCluster.setMap(mapNow);
+              }
             }
           } catch (_) {
             // 정적 포인트 로드 실패 시 무시
@@ -1364,6 +1406,7 @@ function App() {
       convClustererRef.current?.setMap(null);
       policeClustererRef.current?.setMap(null);
       open24ClustererRef.current?.setMap(null);
+      firestationClustererRef.current?.setMap(null);
       cctvClustererRef.current = null;
       lightClustererRef.current = null;
       safelightClustererRef.current = null;
@@ -1371,6 +1414,7 @@ function App() {
       convClustererRef.current = null;
       policeClustererRef.current = null;
       open24ClustererRef.current = null;
+      firestationClustererRef.current = null;
       if (el) {
         el.innerHTML = '';
       }
@@ -1462,6 +1506,18 @@ function App() {
     } else {
       open24MarkersRef.current.forEach((m) => m.setMap(null));
       open24ClustererRef.current?.clear();
+    }
+  };
+
+  const toggleFirestation = () => {
+    const next = !showFirestation;
+    setShowFirestation(next);
+    if (next) {
+      firestationClustererRef.current?.addMarkers(firestationMarkersRef.current);
+      firestationClustererRef.current?.setMap(mapInstanceRef.current);
+    } else {
+      firestationMarkersRef.current.forEach((m) => m.setMap(null));
+      firestationClustererRef.current?.clear();
     }
   };
 
@@ -2002,6 +2058,14 @@ function App() {
               aria-pressed={showOpen24}
             >
               🌙 24시
+            </button>
+            <button
+              type="button"
+              className={`${styles.layerToggleBtn} ${showFirestation ? styles.layerToggleBtnFirestation : styles.layerToggleBtnOff}`}
+              onClick={toggleFirestation}
+              aria-pressed={showFirestation}
+            >
+              🚒 소방서
             </button>
           </div>
 

@@ -57,6 +57,12 @@ def main() -> None:
         pd.read_csv(DATA / "police_dongjak.csv", encoding="utf-8-sig"),
     ], ignore_index=True).drop_duplicates(subset=["lat", "lng"])
 
+    # 소방서: 동작구
+    firestation_df = pd.read_csv(DATA / "firestation_dongjak.csv", encoding="utf-8-sig")
+
+    # 24시간 영업: 동작구
+    open24_df = pd.read_csv(DATA / "open24_dongjak.csv", encoding="utf-8-sig")
+
     out = {
         "cctv":          cctv_gwanak_pts + cctv_dongjak_pts,
         "streetlight":   [{"lat": float(r["위도"]), "lng": float(r["경도"])} for _, r in sl_df.iterrows()],
@@ -64,6 +70,8 @@ def main() -> None:
         "entertainment": [{"lat": float(r["lat"]),  "lng": float(r["lng"])}  for _, r in ent_df.iterrows()],
         "convenience":   [{"lat": float(r["lat"]),  "lng": float(r["lng"])}  for _, r in conv_df.iterrows()],
         "police":        [{"lat": float(r["lat"]),  "lng": float(r["lng"])}  for _, r in police_df.iterrows()],
+        "firestation":   [{"lat": float(r["lat"]),  "lng": float(r["lng"])}  for _, r in firestation_df.iterrows()],
+        "open24":        [{"lat": float(r["lat"]),  "lng": float(r["lng"])}  for _, r in open24_df.iterrows()],
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
@@ -71,7 +79,8 @@ def main() -> None:
         f"저장: {OUT}\n"
         f"  CCTV {len(out['cctv'])} (관악 {len(cctv_gwanak_pts)} + 동작 {len(cctv_dongjak_pts)}대)\n"
         f"  가로등 {len(out['streetlight'])}, 보안등 {len(out['safelight'])}, "
-        f"유흥업소 {len(out['entertainment'])}, 편의점 {len(out['convenience'])}, 경찰서 {len(out['police'])}"
+        f"유흥업소 {len(out['entertainment'])}, 편의점 {len(out['convenience'])}, "
+        f"경찰서 {len(out['police'])}, 소방서 {len(out['firestation'])}, 24시 {len(out['open24'])}"
     )
 
 

@@ -26,6 +26,7 @@ POLICE_DONGJAK_CSV_PATH       = Path(__file__).parents[1] / "data" / "police_don
 # ENTERTAINMENT_GWANAK_CSV_PATH = Path(__file__).parents[1] / "data" / "entertainment_gwanak.csv"  # 관악구 비활성화
 ENTERTAINMENT_DONGJAK_CSV_PATH= Path(__file__).parents[1] / "data" / "entertainment_dongjak.csv"
 OPEN24_DONGJAK_CSV_PATH = Path(__file__).parents[1] / "data" / "open24_dongjak.csv"
+FIRESTATION_DONGJAK_CSV_PATH = Path(__file__).parents[1] / "data" / "firestation_dongjak.csv"
 
 # 서울 기준 위경도→미터 변환 상수
 _REF_LAT = 37.47
@@ -38,10 +39,10 @@ _GRADE_SCORE_SAFE_GE = 20.0    # S ≥ 20 → 안전 (옛 총점 ≥ 60)
 
 # 편의점·24시 점포: 한국시 22:00~익일 08:00 전까지만 반경 실제 반영, 그 외(낮)에는 각 항목 cap 만점 고정
 _TZ_SEOUL = ZoneInfo("Asia/Seoul")
-_STORE_RADIUS_M = 100.0
+_STORE_RADIUS_M = 150.0
 _STORE_CAP = 2
 _STORE_WEIGHT = 3.5
-_STORE_LAYER_MAX_SCORE = float(_STORE_CAP) * _STORE_WEIGHT  # 7.0
+_STORE_LAYER_MAX_SCORE = 10.0
 
 
 def store_proximity_night_window_kst(now: Optional[datetime] = None) -> bool:
@@ -65,6 +66,7 @@ _convenience_tree: Optional[cKDTree] = None
 _open24_tree: Optional[cKDTree] = None
 _police_tree: Optional[cKDTree] = None
 _entertainment_tree: Optional[cKDTree] = None
+_firestation_tree: Optional[cKDTree] = None
 
 
 def _load_cctv() -> None:
@@ -92,16 +94,33 @@ def _load_cctv() -> None:
 
 
 def _cctv_score_for_coord(lat: float, lng: float) -> float:
-    """30m 직접감시 cap=2 × 6.0(max 12) + 70m 경로추적 cap=2 × 3.5(max 7)."""
+    """30m 직접감시: 1개=12점, 2개 이상=18점 고정.
+    30~100m 경로추적: base 6점, cap 3개, 체감수익감소(max 10.5점).
+    """
     _load_cctv()
     if _cctv_tree is None or len(_cctv_qty) == 0:
         return 0.0
     x, y = lng * _LNG_M, lat * _LAT_M
-    idxs_near = _cctv_tree.query_ball_point([x, y], r=30.0)
-    idxs_far  = _cctv_tree.query_ball_point([x, y], r=70.0)
+    idxs_near = set(_cctv_tree.query_ball_point([x, y], r=30.0))
+    idxs_far  = set(_cctv_tree.query_ball_point([x, y], r=100.0)) - idxs_near
     qty_near = float(_cctv_qty[list(idxs_near)].sum()) if idxs_near else 0.0
     qty_far  = float(_cctv_qty[list(idxs_far)].sum())  if idxs_far  else 0.0
-    return min(qty_near, 2) * 6.0 + min(qty_far, 2) * 3.5
+
+    if qty_near >= 2:
+        near_score = 18.0
+    elif qty_near >= 1:
+        near_score = 12.0
+    else:
+        near_score = 0.0
+
+    far_score, mult, rem = 0.0, 1.0, min(qty_far, 3.0)
+    while rem >= 0.001:
+        take = min(1.0, rem)
+        far_score += 6.0 * mult * take
+        mult *= 0.5
+        rem -= take
+
+    return near_score + far_score
 
 
 def _load_safelight() -> None:
@@ -117,8 +136,8 @@ def _load_safelight() -> None:
     _safelight_tree = cKDTree(np.column_stack([xs, ys]))
 
 
-def _safelight_score_for_coord(lat: float, lng: float, radius_m: float = 5.0) -> float:
-    """반경 5m 내 보안등 cap=1 × 4.0(max 4)."""
+def _safelight_score_for_coord(lat: float, lng: float, radius_m: float = 10.0) -> float:
+    """반경 10m 내 보안등 cap=1 × 4.0(max 4)."""
     _load_safelight()
     if _safelight_tree is None:
         return 0.0
@@ -145,8 +164,8 @@ def _load_streetlight() -> None:
     _streetlight_tree = cKDTree(np.column_stack([xs, ys]))
 
 
-def _streetlight_score_for_coord(lat: float, lng: float, radius_m: float = 20.0) -> float:
-    """반경 20m 내 가로등 cap=2 × 5.5(max 11)."""
+def _streetlight_score_for_coord(lat: float, lng: float, radius_m: float = 25.0) -> float:
+    """반경 25m 내 가로등 cap=2 × 5.5(max 11)."""
     _load_streetlight()
     if _streetlight_tree is None:
         return 0.0
@@ -238,6 +257,30 @@ def _police_score_for_coord(lat: float, lng: float, radius_m: float = 200.0) -> 
     return min(len(idxs), 1) * 14.0
 
 
+def _load_firestation() -> None:
+    global _firestation_tree
+    if _firestation_tree is not None:
+        return
+    if not FIRESTATION_DONGJAK_CSV_PATH.exists():
+        _firestation_tree = None
+        return
+    df = pd.read_csv(FIRESTATION_DONGJAK_CSV_PATH, encoding="utf-8-sig").dropna(subset=["lat", "lng"])
+    if len(df) == 0:
+        _firestation_tree = None
+        return
+    xs, ys = df["lng"].values * _LNG_M, df["lat"].values * _LAT_M
+    _firestation_tree = cKDTree(np.column_stack([xs, ys]))
+
+
+def _firestation_score_for_coord(lat: float, lng: float, radius_m: float = 300.0) -> float:
+    """반경 300m 내 소방서 cap=1 × 10.5(경찰서 14점의 75%, max 10.5점)."""
+    _load_firestation()
+    if _firestation_tree is None:
+        return 0.0
+    idxs = _firestation_tree.query_ball_point([lng * _LNG_M, lat * _LAT_M], r=radius_m)
+    return min(len(idxs), 1) * 10.5
+
+
 def _load_entertainment() -> None:
     global _entertainment_tree
     if _entertainment_tree is not None:
@@ -288,6 +331,7 @@ class SafetyScore(BaseModel):
     open24_count: int
     ent_count: int
     police_count: int
+    firestation_count: int
 
 
 class LatLng(BaseModel):
@@ -327,6 +371,7 @@ def get_safety_score(
     _load_convenience()
     _load_open24()
     _load_police()
+    _load_firestation()
     _load_entertainment()
 
     x, y = lng * _LNG_M, lat * _LAT_M
@@ -362,6 +407,11 @@ def get_safety_score(
     if _police_tree is not None:
         police_count = len(_police_tree.query_ball_point([x, y], r=200.0))
 
+    # 소방서 개수
+    firestation_count = 0
+    if _firestation_tree is not None:
+        firestation_count = len(_firestation_tree.query_ball_point([x, y], r=300.0))
+
     # 유흥주점 개수
     ent_count = 0
     if _entertainment_tree is not None:
@@ -370,9 +420,10 @@ def get_safety_score(
     score = (
         _cctv_score_for_coord(lat, lng)
         + _streetlight_score_for_coord(lat, lng)
-        + _safelight_score_for_coord(lat, lng, radius_m=5.0)
+        + _safelight_score_for_coord(lat, lng, radius_m=10.0)
         + _combined_conv_open24_score_for_coord(lat, lng)
         + _police_score_for_coord(lat, lng)
+        + _firestation_score_for_coord(lat, lng)
         - _entertainment_score_for_coord(lat, lng)
     )
 
@@ -387,4 +438,5 @@ def get_safety_score(
         open24_count=open24_count,
         ent_count=ent_count,
         police_count=police_count,
+        firestation_count=firestation_count,
     )
