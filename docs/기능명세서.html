@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Safe Route Sinlim — 기능명세서</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-light: #dbeafe;
+      --success: #16a34a;
+      --success-light: #dcfce7;
+      --warning: #d97706;
+      --warning-light: #fef3c7;
+      --danger: #dc2626;
+      --danger-light: #fee2e2;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-400: #9ca3af;
+      --gray-600: #4b5563;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --gray-900: #111827;
+      --radius: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
+      --shadow-md: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+      font-size: 14px;
+      line-height: 1.65;
+      color: var(--gray-800);
+      background: var(--gray-50);
+    }
+
+    /* 헤더 */
+    .doc-header {
+      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+      color: #fff;
+      padding: 48px 40px 40px;
+    }
+    .doc-header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+    .doc-header .subtitle { font-size: 14px; opacity: .8; margin-bottom: 20px; }
+    .meta-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: 12px;
+    }
+
+    /* 레이아웃 */
+    .layout { display: flex; }
+    .sidebar {
+      width: 240px;
+      flex-shrink: 0;
+      background: #fff;
+      border-right: 1px solid var(--gray-200);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 0;
+    }
+    .sidebar-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--gray-400);
+      padding: 0 20px 10px;
+    }
+    .sidebar a {
+      display: block;
+      padding: 7px 20px;
+      font-size: 13px;
+      color: var(--gray-600);
+      text-decoration: none;
+      border-left: 3px solid transparent;
+      transition: all .15s;
+    }
+    .sidebar a:hover { color: var(--primary); background: var(--primary-light); border-left-color: var(--primary); }
+    .sidebar a.sub { padding-left: 34px; font-size: 12px; }
+
+    .content { flex: 1; min-width: 0; padding: 40px; max-width: 960px; }
+
+    /* 섹션 */
+    section { margin-bottom: 56px; }
+    section > h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--gray-900);
+      border-bottom: 2px solid var(--primary);
+      padding-bottom: 10px;
+      margin-bottom: 24px;
+    }
+    h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--gray-800);
+      margin: 28px 0 12px;
+    }
+    h4 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--gray-700);
+      margin: 16px 0 8px;
+    }
+    p { margin-bottom: 10px; color: var(--gray-700); }
+
+    /* 카드 */
+    .card {
+      background: #fff;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--gray-900);
+      margin-bottom: 8px;
+    }
+
+    /* 그리드 */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 700px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    }
+
+    /* 테이블 */
+    .table-wrap { overflow-x: auto; margin-bottom: 16px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    th {
+      background: var(--gray-800);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      text-align: left;
+      padding: 10px 14px;
+      white-space: nowrap;
+    }
+    td {
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--gray-100);
+      font-size: 13px;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--gray-50); }
+
+    /* 배지 */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-safe { background: var(--success-light); color: var(--success); }
+    .badge-normal { background: var(--warning-light); color: var(--warning); }
+    .badge-danger { background: var(--danger-light); color: var(--danger); }
+    .badge-blue { background: var(--primary-light); color: var(--primary); }
+    .badge-gray { background: var(--gray-100); color: var(--gray-600); }
+
+    /* 코드 */
+    code {
+      font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+      font-size: 12px;
+      background: var(--gray-100);
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: #be185d;
+    }
+    pre {
+      background: var(--gray-900);
+      color: #e5e7eb;
+      padding: 18px 20px;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-size: 12.5px;
+      line-height: 1.7;
+      margin: 12px 0 16px;
+    }
+    pre code { background: none; color: inherit; padding: 0; }
+
+    /* 알고리즘 박스 */
+    .algo-box {
+      background: #fff;
+      border: 1px solid var(--gray-200);
+      border-left: 4px solid var(--primary);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 16px;
+    }
+    .algo-box h4 { margin-top: 0; color: var(--primary); }
+
+    /* 점수 바 */
+    .score-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .score-label { width: 160px; font-size: 13px; color: var(--gray-700); flex-shrink: 0; }
+    .score-bar-wrap { flex: 1; background: var(--gray-100); border-radius: 6px; height: 10px; }
+    .score-bar { height: 10px; border-radius: 6px; }
+    .score-val { width: 60px; font-size: 12px; font-weight: 600; color: var(--gray-700); text-align: right; }
+
+    /* 플로우 */
+    .flow { display: flex; align-items: flex-start; gap: 0; margin: 16px 0; flex-wrap: wrap; }
+    .flow-step {
+      flex: 1;
+      min-width: 120px;
+      background: var(--primary-light);
+      border: 1px solid #93c5fd;
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      font-size: 12px;
+      color: var(--primary);
+      text-align: center;
+      position: relative;
+    }
+    .flow-step::after {
+      content: '→';
+      position: absolute;
+      right: -14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--gray-400);
+      font-size: 16px;
+      z-index: 1;
+    }
+    .flow-step:last-child::after { display: none; }
+    .flow-step strong { display: block; font-size: 11px; font-weight: 700; margin-bottom: 3px; }
+
+    /* 개요 카드 */
+    .overview-card {
+      background: linear-gradient(135deg, var(--primary-light), #ede9fe);
+      border: 1px solid #c4b5fd;
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+
+    /* 포인트 리스트 */
+    ul.point-list { list-style: none; }
+    ul.point-list li {
+      padding: 6px 0 6px 20px;
+      position: relative;
+      font-size: 13px;
+      color: var(--gray-700);
+      border-bottom: 1px dashed var(--gray-100);
+    }
+    ul.point-list li:last-child { border-bottom: none; }
+    ul.point-list li::before {
+      content: '▸';
+      position: absolute;
+      left: 0;
+      color: var(--primary);
+    }
+
+    /* 등급 범례 */
+    .grade-legend { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+    .grade-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .grade-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    /* 통계 카드 */
+    .stat-card {
+      background: #fff;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      text-align: center;
+    }
+    .stat-val { font-size: 24px; font-weight: 700; color: var(--primary); }
+    .stat-label { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
+
+    /* 인포박스 */
+    .info-box {
+      background: var(--primary-light);
+      border: 1px solid #93c5fd;
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #1e40af;
+      margin: 12px 0;
+    }
+    .warn-box {
+      background: var(--warning-light);
+      border: 1px solid #fcd34d;
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #92400e;
+      margin: 12px 0;
+    }
+
+    /* 섹션 번호 */
+    .sec-num {
+      display: inline-block;
+      width: 28px;
+      height: 28px;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 28px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    /* 목차 페이지 */
+    .toc-page { margin-bottom: 40px; }
+
+    @media print {
+      .sidebar { display: none; }
+      .content { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- 헤더 -->
+<div class="doc-header">
+  <h1>🗺️ Safe Route Sinlim — 기능명세서</h1>
+  <p class="subtitle">관악구·동작구 야간 안전경로 탐색 웹 애플리케이션 · 제작자 관점 전체 기능 문서</p>
+  <div class="meta-chips">
+    <span class="chip">버전 1.0</span>
+    <span class="chip">작성일 2025-05-01</span>
+    <span class="chip">Frontend: React + TypeScript</span>
+    <span class="chip">Backend: FastAPI (Python)</span>
+    <span class="chip">지도: 카카오맵 SDK</span>
+    <span class="chip">경로: TMAP 도보 API</span>
+    <span class="chip">AI: Gemini 2.5 Flash</span>
+  </div>
+</div>
+
+<div class="layout">
+
+  <!-- 사이드바 -->
+  <nav class="sidebar">
+    <div class="sidebar-title">목차</div>
+    <a href="#overview">1. 프로젝트 개요</a>
+    <a href="#architecture">2. 시스템 아키텍처</a>
+    <a href="#data-pipeline">3. 데이터 파이프라인</a>
+    <a href="#safety-score">4. 안전점수 산출</a>
+    <a class="sub" href="#score-formula">4.1 점수 공식</a>
+    <a class="sub" href="#score-realtime">4.2 실시간 조회</a>
+    <a class="sub" href="#score-grade">4.3 등급 판정</a>
+    <a href="#route">5. 경로 탐색</a>
+    <a class="sub" href="#route-normal">5.1 일반경로</a>
+    <a class="sub" href="#route-safe">5.2 안전경로 알고리즘</a>
+    <a class="sub" href="#route-fallback">5.3 Fallback 조건</a>
+    <a href="#ai-feature">6. AI 경로 분석</a>
+    <a href="#map-ui">7. 지도 UI</a>
+    <a class="sub" href="#map-layers">7.1 레이어 토글</a>
+    <a class="sub" href="#map-markers">7.2 마커 시스템</a>
+    <a href="#search">8. 검색 기능</a>
+    <a href="#location">9. 위치 추적</a>
+    <a href="#api-spec">10. API 명세</a>
+    <a href="#tech-stack">11. 기술 스택</a>
+    <a href="#constraints">12. 제약 및 한계</a>
+  </nav>
+
+  <!-- 본문 -->
+  <div class="content">
+
+    <!-- 1. 프로젝트 개요 -->
+    <section id="overview">
+      <h2><span class="sec-num">1</span>프로젝트 개요</h2>
+
+      <div class="overview-card">
+        <p><strong>Safe Route Sinlim</strong>은 서울특별시 관악구·동작구 일대를 대상으로 CCTV, 가로등, 보안등, 편의점, 경찰서/지구대, 유흥시설 데이터를 결합하여 <em>야간 보행 안전점수</em>를 산출하고, TMAP 도보 API 경로 위에 안전한 우회를 자동 적용하여 최적 안전경로를 제공하는 웹 서비스입니다.</p>
+        <p>Gemini 2.5 Flash AI가 경로의 안전 특성을 분석하여 보행자에게 실질적인 행동 조언을 제공합니다.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="stat-card">
+          <div class="stat-val">100m²</div>
+          <div class="stat-label">기본 격자 단위</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val">5~30m</div>
+          <div class="stat-label">실시간 조회 반경</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val">10~100</div>
+          <div class="stat-label">안전점수 범위</div>
+        </div>
+      </div>
+
+      <h3>대상 지역</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>구분</th><th>위도 범위</th><th>경도 범위</th><th>포함 데이터</th></tr></thead>
+          <tbody>
+            <tr><td>관악구</td><td>37.440 ~ 37.525</td><td>126.898 ~ 126.990</td><td>CCTV, 가로등, 편의점, 유흥시설, 경찰서</td></tr>
+            <tr><td>동작구</td><td>(격자에 통합)</td><td>(격자에 통합)</td><td>CCTV, 가로등, 보안등</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>핵심 사용 시나리오</h3>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">야간 귀가</div>
+          <p>출발지·목적지 입력 → 안전점수 기반 우회경로 + AI 안전 조언 수령</p>
+        </div>
+        <div class="card">
+          <div class="card-title">지역 안전 확인</div>
+          <p>지도 클릭 → 해당 좌표 안전점수(0~100) 및 등급(안전/보통/위험) 즉시 조회</p>
+        </div>
+        <div class="card">
+          <div class="card-title">인프라 현황 파악</div>
+          <p>레이어 토글로 CCTV / 가로등 설치 위치 지도 위에 시각화</p>
+        </div>
+        <div class="card">
+          <div class="card-title">장소 검색</div>
+          <p>키워드 입력 → POI 목록 → 선택 시 해당 위치를 출발·도착지로 자동 설정</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 시스템 아키텍처 -->
+    <section id="architecture">
+      <h2><span class="sec-num">2</span>시스템 아키텍처</h2>
+
+      <div class="flow">
+        <div class="flow-step"><strong>사용자 브라우저</strong>React SPA<br/>카카오맵</div>
+        <div class="flow-step"><strong>FastAPI 백엔드</strong>Railway 배포<br/>:8000</div>
+        <div class="flow-step"><strong>TMAP API</strong>도보 경로<br/>+ POI 검색</div>
+        <div class="flow-step"><strong>Gemini API</strong>경로 AI 분석<br/>gemini-2.5-flash</div>
+        <div class="flow-step"><strong>CSV 데이터</strong>안전 격자<br/>+ KDTree</div>
+      </div>
+
+      <h3>디렉토리 구조</h3>
+      <pre><code>safe-route-sinlim/
+├── frontend/
+│   └── src/
+│       ├── App.tsx          # 전체 UI 로직 (단일 컴포넌트)
+│       └── App.module.css   # 스타일 (CSS Modules)
+└── backend/
+    ├── main.py              # FastAPI 앱, CORS, 라우터 등록
+    ├── routers/
+    │   ├── safety.py        # 안전점수·KDTree·레이어 API
+    │   ├── route.py         # 경로 탐색·안전경로 알고리즘
+    │   └── ai_description.py# Gemini AI 경로 분석
+    └── data/
+        ├── safety_grid.csv         # 관악구 사전계산 격자
+        ├── safety_grid_dongjak.csv # 동작구 사전계산 격자
+        ├── cctv_raw.csv            # 관악구 CCTV
+        ├── cctv_dongjak.csv        # 동작구 CCTV
+        ├── safelight_dongjak.csv   # 동작구 보안등
+        ├── streetlight_raw.csv     # 관악구 가로등
+        └── make_safety_grid.py     # 격자 사전계산 스크립트</code></pre>
+
+      <h3>CORS 및 배포</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>항목</th><th>설정값</th></tr></thead>
+          <tbody>
+            <tr><td>허용 오리진</td><td><code>*</code> (전체), <code>https://saferoute-two.vercel.app</code></td></tr>
+            <tr><td>프론트엔드 배포</td><td>Vercel</td></tr>
+            <tr><td>백엔드 배포</td><td>Railway</td></tr>
+            <tr><td>환경변수</td><td><code>TMAP_APP_KEY</code>, <code>GEMINI_API_KEY</code> (.env)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 3. 데이터 파이프라인 -->
+    <section id="data-pipeline">
+      <h2><span class="sec-num">3</span>데이터 파이프라인</h2>
+
+      <h3>원본 데이터 소스</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>파일명</th><th>대상 구역</th><th>인코딩</th><th>주요 컬럼</th><th>활용 방식</th></tr></thead>
+          <tbody>
+            <tr><td><code>cctv_raw.csv</code></td><td>관악구</td><td>CP949</td><td>위도, 경도, CCTV 수량</td><td>KDTree + 격자 계산</td></tr>
+            <tr><td><code>cctv_dongjak.csv</code></td><td>동작구</td><td>UTF-8-SIG</td><td>lat, lng, qty</td><td>KDTree + 격자 계산</td></tr>
+            <tr><td><code>streetlight_raw.csv</code></td><td>관악구</td><td>CP949</td><td>위도, 경도</td><td>격자 계산 (light_count)</td></tr>
+            <tr><td><code>streetlight_dongjak.csv</code></td><td>동작구</td><td>UTF-8-SIG</td><td>lat, lng</td><td>격자 계산 (light_count)</td></tr>
+            <tr><td><code>safelight_dongjak.csv</code></td><td>동작구</td><td>UTF-8-SIG</td><td>lat, lng</td><td>KDTree + 격자 계산</td></tr>
+            <tr><td><code>convenience_gwanak.csv</code></td><td>관악구</td><td>UTF-8-SIG</td><td>lat, lng</td><td>격자 계산 (conv_count)</td></tr>
+            <tr><td><code>entertainment_gwanak.csv</code></td><td>관악구</td><td>UTF-8-SIG</td><td>lat, lng</td><td>격자 계산 (ent_count)</td></tr>
+            <tr><td><code>police_gwanak.csv</code></td><td>관악구</td><td>UTF-8-SIG</td><td>lat, lng</td><td>격자 계산 (police_count)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>격자 사전계산 (make_safety_grid.py)</h3>
+      <div class="algo-box">
+        <h4>100m × 100m 격자 생성 과정</h4>
+        <ol style="padding-left:18px; font-size:13px; color:var(--gray-700); line-height:1.9;">
+          <li>위경도 → 미터 변환 (<code>REF_LAT=37.47</code> 기준 cos 보정)</li>
+          <li>영역 전체를 <code>STEP_LAT=100/111320</code>, <code>STEP_LNG=100/(111320×cos(37.47°))</code> 간격으로 격자 분할</li>
+          <li>각 격자 중심에서 cKDTree <code>query_ball_point</code>로 반경 내 시설 집계</li>
+          <li>점수 공식 적용 후 CSV로 저장 (safety_grid.csv / safety_grid_dongjak.csv)</li>
+          <li>등급 배정: 전체 격자 순위 기준 상대평가 (하위 30%=위험, 상위 30%=안전)</li>
+        </ol>
+      </div>
+
+      <h3>런타임 데이터 로딩 (지연 초기화)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>전역 캐시</th><th>로드 함수</th><th>내용</th></tr></thead>
+          <tbody>
+            <tr><td><code>_grid_df</code></td><td><code>_load_grid()</code></td><td>관악+동작구 격자 DataFrame (최초 호출 시 로드, 이후 캐시)</td></tr>
+            <tr><td><code>_cctv_tree</code>, <code>_cctv_qty</code></td><td><code>_load_cctv()</code></td><td>CCTV 위치 KDTree + 수량 배열</td></tr>
+            <tr><td><code>_safelight_tree</code></td><td><code>_load_safelight()</code></td><td>동작구 보안등 KDTree</td></tr>
+            <tr><td><code>_grade_danger_thresh</code>, <code>_grade_safe_thresh</code></td><td><code>_get_grade_thresholds()</code></td><td>격자 score 30/70 백분위수 (절대 임계값)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="info-box">
+        ℹ️ 모든 KDTree는 위경도를 미터 단위로 변환한 좌표에 구축됩니다.<br>
+        위도: <code>lat × 111,320</code> / 경도: <code>lng × 111,320 × cos(37.47°)</code>
+      </div>
+    </section>
+
+    <!-- 4. 안전점수 -->
+    <section id="safety-score">
+      <h2><span class="sec-num">4</span>안전점수 산출</h2>
+
+      <p>안전점수는 <strong>격자 기반 사전계산</strong>과 <strong>실시간 원형 조회</strong>를 혼합하여 계산합니다. 격자에서 CCTV·보안등 기여분을 제거하고 정밀한 실시간 값으로 교체하는 방식입니다.</p>
+
+      <h3 id="score-formula">4.1 격자 기본 점수 공식</h3>
+
+      <div class="algo-box">
+        <h4>기본 공식 (make_safety_grid.py)</h4>
+        <pre><code>기본점수 = 40점
+
+CCTV 가산   = min(반경 100m 내 수량 합계, 4) × 5점   (최대 20점)
+가로등 가산  = min(반경  80m 내 개수,     3) × 5점   (최대 15점)
+편의점 가산  = min(반경 100m 내 개수,     2) × 5점   (최대 10점)
+경찰서 가산  = min(반경 300m 내 개수,     1) × 10점  (최대 10점)
+유흥시설 감점 = min(반경 100m 내 개수,   3) × 3점   (최대  9점)
+
+격자점수 = clamp(40 + CCTV + 가로등 + 편의점 + 경찰서 - 유흥시설, 10, 100)</code></pre>
+      </div>
+
+      <h3>점수 요소별 기여도</h3>
+      <div class="score-row">
+        <span class="score-label">CCTV (격자 100m)</span>
+        <div class="score-bar-wrap"><div class="score-bar" style="width:33%;background:#2563eb;"></div></div>
+        <span class="score-val">최대 20점</span>
+      </div>
+      <div class="score-row">
+        <span class="score-label">가로등 (격자 80m)</span>
+        <div class="score-bar-wrap"><div class="score-bar" style="width:25%;background:#7c3aed;"></div></div>
+        <span class="score-val">최대 15점</span>
+      </div>
+      <div class="score-row">
+        <span class="score-label">편의점 (격자 100m)</span>
+        <div class="score-bar-wrap"><div class="score-bar" style="width:17%;background:#059669;"></div></div>
+        <span class="score-val">최대 10점</span>
+      </div>
+      <div class="score-row">
+        <span class="score-label">경찰서/지구대/파출소</span>
+        <div class="score-bar-wrap"><div class="score-bar" style="width:17%;background:#0891b2;"></div></div>
+        <span class="score-val">최대 10점</span>
+      </div>
+      <div class="score-row">
+        <span class="score-label">유흥시설 (감점)</span>
+        <div class="score-bar-wrap"><div class="score-bar" style="width:15%;background:#dc2626;"></div></div>
+        <span class="score-val">최대 -9점</span>
+      </div>
+
+      <h3 id="score-realtime">4.2 실시간 원형 조회 (런타임 교체)</h3>
+      <p>경로 계산 및 API 응답 시점에 격자 CCTV·보안등 기여분을 제거하고 아래 실시간 값으로 대체합니다.</p>
+
+      <div class="grid-2">
+        <div class="algo-box">
+          <h4>CCTV — 이중 반경 (Dual-Ring)</h4>
+          <pre><code># Inner: 15m 이내 (전체 가중치)
+inner_idxs = tree.query_ball_point(pt, r=15.0)
+# Outer: 15m 초과 ~ 30m 이내 (절반 가중치)
+outer_idxs = tree.query_ball_point(pt, r=30.0) - inner_idxs
+
+score = min(inner_qty, 4) × 5.0   # 최대 20점
+      + min(outer_qty, 4) × 2.5   # 최대 10점
+# 합계 최대 30점</code></pre>
+          <p style="font-size:12px; color:var(--gray-600);">
+            동일 카메라는 inner 또는 outer 중 하나에만 포함됩니다 (set 차집합).
+            관악구 + 동작구 CCTV 통합 조회.
+          </p>
+        </div>
+
+        <div class="algo-box">
+          <h4>보안등 — 단일 반경 5m</h4>
+          <pre><code># 동작구 보안등만 적용
+idxs = safelight_tree.query_ball_point(pt, r=5.0)
+
+score = min(len(idxs), 3) × 3.0
+# 최대 9점</code></pre>
+          <p style="font-size:12px; color:var(--gray-600);">
+            5m 이내에 보안등이 1개이상 있을 때만 가산.
+            관악구 가로등은 격자 계산에 반영된 상태이므로 교체하지 않음.
+          </p>
+        </div>
+      </div>
+
+      <div class="algo-box">
+        <h4>최종 실시간 점수 계산 (_score_for_coord)</h4>
+        <pre><code>grid_score   = 격자 기본점수 (사전계산)
+old_cctv     = min(격자 cctv_count, 4) × 5    # 제거할 기존 CCTV 기여
+old_safelight = min(격자 safelight_count, 3) × 3  # 제거할 기존 보안등 기여
+
+new_cctv      = _cctv_score_for_coord(lat, lng)        # 실시간 이중반경
+new_safelight = _safelight_score_for_coord(lat, lng)   # 실시간 5m
+
+adjusted = clamp(
+    grid_score - old_cctv - old_safelight + new_cctv + new_safelight,
+    10.0, 100.0
+)</code></pre>
+      </div>
+
+      <h3 id="score-grade">4.3 등급 판정</h3>
+      <p>런타임 등급은 격자 전체 score의 <strong>절대 백분위수 임계값</strong>으로 결정합니다. 격자 수정 없이 재호출만으로 등급 경계를 자동 계산합니다.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>등급</th><th>조건</th><th>기준 (예시)</th><th>표시 색상</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-danger">위험</span></td>
+              <td>score &lt; 격자 30 백분위수</td>
+              <td>~약 40점</td>
+              <td>빨간색</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-normal">보통</span></td>
+              <td>30 백분위수 ≤ score &lt; 70 백분위수</td>
+              <td>약 40~55점</td>
+              <td>노란색</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-safe">안전</span></td>
+              <td>score ≥ 격자 70 백분위수</td>
+              <td>55점 이상~</td>
+              <td>초록색</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="info-box">
+        ℹ️ 격자 grade 컬럼은 사전계산 시 상대평가로 배정됩니다. 런타임 등급(<code>score_to_grade_realtime</code>)은 절대 임계값으로 판정하므로, 실시간 조정 후에도 일관성 있는 등급 기준이 적용됩니다.
+      </div>
+    </section>
+
+    <!-- 5. 경로 탐색 -->
+    <section id="route">
+      <h2><span class="sec-num">5</span>경로 탐색</h2>
+
+      <h3 id="route-normal">5.1 일반경로 (Normal Route)</h3>
+      <div class="flow">
+        <div class="flow-step"><strong>STEP 1</strong>TMAP 도보 API<br/>출발→도착 1회 호출</div>
+        <div class="flow-step"><strong>STEP 2</strong>100m 간격<br/>좌표 샘플링</div>
+        <div class="flow-step"><strong>STEP 3</strong>각 점 _score_for_coord<br/>안전점수 계산</div>
+        <div class="flow-step"><strong>STEP 4</strong>avg_score, grade<br/>집계 후 반환</div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>반환 필드</th><th>설명</th></tr></thead>
+          <tbody>
+            <tr><td><code>type: "normal"</code></td><td>일반경로 식별자</td></tr>
+            <tr><td><code>points</code></td><td>전체 경로 좌표 배열 <code>[[lat, lng], ...]</code></td></tr>
+            <tr><td><code>segments</code></td><td>100m 샘플링된 구간별 {lat, lng, score, grade}</td></tr>
+            <tr><td><code>avg_score</code></td><td>전체 구간 점수 평균</td></tr>
+            <tr><td><code>grade</code></td><td>위험 구간 30% 이상이면 "위험", 안전 구간 50% 이상이면 "안전"</td></tr>
+            <tr><td><code>duration</code></td><td>소요시간 (분)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="route-safe">5.2 안전경로 알고리즘 (_build_safe_route)</h3>
+      <p>일반경로를 기반으로 위험 구간을 감지하고, 수직 우회 포인트(W)를 삽입하여 TMAP API를 재호출합니다.</p>
+
+      <div class="algo-box">
+        <h4>우회 생성 4단계</h4>
+        <ol style="padding-left:18px; font-size:13px; color:var(--gray-700); line-height:2;">
+          <li><strong>위험 구간 식별</strong>: 샘플링된 좌표에서 연속적으로 등급이 "안전"이 아닌 구간을 그룹화</li>
+          <li><strong>우회 포인트(W) 선택</strong>: 위험 구간 중간점에서 진행 방향 수직으로 좌/우 각 100m 지점 계산 → 더 안전한 점(W)을 선택</li>
+          <li><strong>우회 가치 검증</strong>: <code>W_score > stretch_avg</code>일 때만 TMAP A→W→B 재호출</li>
+          <li><strong>우회 적용 여부 확정</strong>: 재호출 결과 <code>alt_avg > stretch_avg</code>일 때만 우회 구간으로 교체</li>
+        </ol>
+      </div>
+
+      <div class="flow">
+        <div class="flow-step"><strong>A 지점</strong>위험 구간<br/>진입 직전 안전점</div>
+        <div class="flow-step"><strong>W 선택</strong>수직 ±100m<br/>더 안전한 방향</div>
+        <div class="flow-step"><strong>TMAP 재호출</strong>A → W → B<br/>경유지 경로</div>
+        <div class="flow-step"><strong>alt_avg 비교</strong>개선 시만<br/>우회 적용</div>
+        <div class="flow-step"><strong>B 지점</strong>위험 구간<br/>복귀 직후 점</div>
+      </div>
+
+      <h3 id="route-fallback">5.3 Fallback 조건</h3>
+      <div class="warn-box">
+        ⚠️ 아래 조건 중 하나라도 충족되면 안전경로를 포기하고 일반경로를 "safe" 타입으로 반환합니다.
+        <ul style="padding-left:18px; margin-top:8px;">
+          <li>안전경로 avg_score &lt; 일반경로 avg_score (우회가 오히려 더 위험)</li>
+          <li>안전경로 소요시간 &gt; 일반경로 소요시간 × 1.3 (30% 이상 지연)</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 6. AI 기능 -->
+    <section id="ai-feature">
+      <h2><span class="sec-num">6</span>AI 경로 분석 (Gemini)</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>항목</th><th>내용</th></tr></thead>
+          <tbody>
+            <tr><td>엔드포인트</td><td><code>POST /api/route-description</code></td></tr>
+            <tr><td>AI 모델</td><td>Gemini 2.5 Flash (<code>gemini-2.5-flash</code>)</td></tr>
+            <tr><td>호출 시점</td><td>경로 탐색 완료 후 사용자가 결과 확인 시</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>요청 / 응답 구조</h3>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">요청 (RouteDescriptionRequest)</div>
+          <ul class="point-list">
+            <li><code>segments</code>: 경로 구간 목록 (grade, 시설 수치)</li>
+            <li><code>avg_score</code>: 전체 평균 안전점수</li>
+            <li><code>grade</code>: 전체 등급 ("안전"/"보통"/"위험")</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-title">응답 (RouteDescriptionResponse)</div>
+          <ul class="point-list">
+            <li><code>safe_points</code>: 안전한 이유 2가지 이내</li>
+            <li><code>warning_points</code>: 위험 요인 2가지 이내</li>
+            <li><code>ai_summary</code>: 보행자 행동 조언 2문장 이내</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>프롬프트 설계 방향</h3>
+      <ul class="point-list">
+        <li>안전/보통/위험 구간 비율과 CCTV·가로등·편의점·유흥시설 수치를 근거로 설명 생성</li>
+        <li>수치 및 점수 언급 금지 — 실제 보행자 행동 조언만 작성</li>
+        <li>유흥시설이 많은 경우 야간 주취자 위험 언급</li>
+        <li>출력 포맷: 순수 JSON (마크다운·코드블록 금지)</li>
+      </ul>
+    </section>
+
+    <!-- 7. 지도 UI -->
+    <section id="map-ui">
+      <h2><span class="sec-num">7</span>지도 UI</h2>
+
+      <h3 id="map-layers">7.1 레이어 토글</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>레이어</th><th>표시 내용</th><th>기술</th><th>초기 상태</th></tr></thead>
+          <tbody>
+            <tr><td>CCTV 레이어</td><td>관악구 CCTV 위치</td><td>카카오맵 ClustererMarker</td><td>OFF</td></tr>
+            <tr><td>가로등 레이어</td><td>관악구 가로등 위치</td><td>카카오맵 ClustererMarker</td><td>OFF</td></tr>
+            <tr><td>안전경로 폴리라인</td><td>안전경로 (파란색)</td><td>카카오맵 Polyline</td><td>경로 탐색 후 표시</td></tr>
+            <tr><td>일반경로 폴리라인</td><td>일반경로 (회색)</td><td>카카오맵 Polyline</td><td>경로 탐색 후 표시</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="info-box">
+        ℹ️ CCTV·가로등 데이터는 <code>GET /api/map-points</code>로 프론트엔드에서 직접 로드합니다. ClustererMarker를 사용하여 줌 레벨에 따라 자동으로 군집 표시합니다.
+      </div>
+
+      <h3 id="map-markers">7.2 마커 시스템</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>마커</th><th>용도</th><th>아이콘</th></tr></thead>
+          <tbody>
+            <tr><td>출발지 마커</td><td>선택된 출발 위치</td><td>녹색 핀</td></tr>
+            <tr><td>도착지 마커</td><td>선택된 도착 위치</td><td>빨간색 핀</td></tr>
+            <tr><td>현재위치 마커</td><td>GPS 현재 위치</td><td>파란색 원</td></tr>
+            <tr><td>경로 세그먼트 마커</td><td>안전점수 구간 표시</td><td>등급별 컬러 원 (녹색/노란색/빨간색)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>지도 초기 설정</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>항목</th><th>값</th></tr></thead>
+          <tbody>
+            <tr><td>초기 중심 좌표</td><td>상도역 (lat: 37.5034, lng: 126.9563 근방)</td></tr>
+            <tr><td>초기 줌 레벨</td><td>지도 API 기본값</td></tr>
+            <tr><td>지도 클릭</td><td>해당 좌표 안전점수 팝업 표시</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 8. 검색 -->
+    <section id="search">
+      <h2><span class="sec-num">8</span>검색 기능</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>항목</th><th>내용</th></tr></thead>
+          <tbody>
+            <tr><td>엔드포인트</td><td><code>GET /api/search-poi?q={검색어}&amp;count=5&amp;center_lat=&amp;center_lng=</code></td></tr>
+            <tr><td>검색 엔진</td><td>TMAP POI 검색 API (백엔드에서 프록시)</td></tr>
+            <tr><td>결과 수</td><td>기본 5개 (count 파라미터로 조절)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>검색 플로우</h3>
+      <div class="flow">
+        <div class="flow-step"><strong>STEP 1</strong>키워드 입력<br/>검색창</div>
+        <div class="flow-step"><strong>STEP 2</strong>TMAP POI<br/>백엔드 프록시</div>
+        <div class="flow-step"><strong>STEP 3</strong>결과 목록<br/>name, address</div>
+        <div class="flow-step"><strong>STEP 4</strong>항목 선택<br/>출발/도착 설정</div>
+        <div class="flow-step"><strong>STEP 5</strong>지도 이동<br/>마커 표시</div>
+      </div>
+
+      <h3>응답 구조 (PoiItem)</h3>
+      <div class="grid-2">
+        <div class="card">
+          <ul class="point-list">
+            <li><code>name</code>: 장소명</li>
+            <li><code>address</code>: 도로명 주소</li>
+            <li><code>lat</code>: 위도</li>
+            <li><code>lng</code>: 경도</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-title">사용자 인터렉션</div>
+          <ul class="point-list">
+            <li>검색 결과 클릭 → 출발지 또는 도착지로 자동 설정</li>
+            <li>지도 지오코딩과 연동하여 마커 표시</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9. 위치 추적 -->
+    <section id="location">
+      <h2><span class="sec-num">9</span>위치 추적</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>항목</th><th>내용</th></tr></thead>
+          <tbody>
+            <tr><td>API</td><td>브라우저 Geolocation API (<code>navigator.geolocation</code>)</td></tr>
+            <tr><td>동작</td><td>현재 위치 버튼 클릭 → 위치 권한 요청 → 현재 좌표 취득</td></tr>
+            <tr><td>활용</td><td>현재위치를 출발지로 자동 설정 또는 지도 이동</td></tr>
+            <tr><td>실패 처리</td><td>권한 거부 또는 위치 취득 실패 시 사용자에게 안내</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 10. API 명세 -->
+    <section id="api-spec">
+      <h2><span class="sec-num">10</span>API 명세</h2>
+
+      <p>모든 엔드포인트는 <code>/api</code> 프리픽스를 사용합니다. FastAPI 자동 문서: <code>/docs</code></p>
+
+      <h3>Safety API</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>메서드</th><th>경로</th><th>설명</th><th>주요 파라미터</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-blue">GET</span></td>
+              <td><code>/api/safety-score</code></td>
+              <td>좌표의 안전점수 조회</td>
+              <td><code>lat</code>, <code>lng</code></td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-blue">GET</span></td>
+              <td><code>/api/map-points</code></td>
+              <td>CCTV·가로등 좌표 목록</td>
+              <td>없음</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>GET /api/safety-score 응답 (SafetyScore)</h4>
+      <pre><code>{
+  "lat": 37.488,
+  "lng": 126.929,
+  "score": 62.5,
+  "grade": "안전",
+  "cctv_count": 2,
+  "light_count": 3,
+  "conv_count": 1,
+  "ent_count": 0,
+  "police_count": 1
+}</code></pre>
+
+      <h3>Route API</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>메서드</th><th>경로</th><th>설명</th><th>주요 파라미터</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-gray">POST</span></td>
+              <td><code>/api/safe-route</code></td>
+              <td>안전경로 + 일반경로 동시 계산</td>
+              <td><code>origin_lat</code>, <code>origin_lng</code>, <code>dest_lat</code>, <code>dest_lng</code></td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-blue">GET</span></td>
+              <td><code>/api/search-poi</code></td>
+              <td>장소 검색</td>
+              <td><code>q</code>, <code>count</code>, <code>center_lat</code>, <code>center_lng</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>POST /api/safe-route 응답 (RouteResponse)</h4>
+      <pre><code>{
+  "routes": [
+    {
+      "type": "safe",
+      "points": [[37.488, 126.929], ...],
+      "segments": [
+        {"lat": 37.488, "lng": 126.929, "score": 65.0, "grade": "안전"},
+        ...
+      ],
+      "avg_score": 62.3,
+      "grade": "안전",
+      "duration": 12
+    },
+    {
+      "type": "normal",
+      ...
+    }
+  ]
+}</code></pre>
+
+      <h3>AI Description API</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>메서드</th><th>경로</th><th>설명</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-gray">POST</span></td>
+              <td><code>/api/route-description</code></td>
+              <td>Gemini AI 경로 분석 및 조언 생성</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>POST /api/route-description 응답</h4>
+      <pre><code>{
+  "safe_points": ["CCTV가 여러 대 설치된 구간을 통과합니다", "편의점 앞을 지나가 상대적으로 안전합니다"],
+  "warning_points": ["일부 구간에 가로등이 부족합니다"],
+  "ai_summary": "귀가 시 이어폰을 한쪽만 착용하여 주변 소리에 집중하세요. 편의점 앞 구간에서 잠시 쉬며 주변을 살피는 것을 권장합니다."
+}</code></pre>
+    </section>
+
+    <!-- 11. 기술 스택 -->
+    <section id="tech-stack">
+      <h2><span class="sec-num">11</span>기술 스택</h2>
+
+      <div class="grid-2">
+        <div>
+          <h3>프론트엔드</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>기술</th><th>용도</th></tr></thead>
+              <tbody>
+                <tr><td>React 18</td><td>SPA 프레임워크</td></tr>
+                <tr><td>TypeScript</td><td>타입 안전성</td></tr>
+                <tr><td>CSS Modules</td><td>컴포넌트 스코프 스타일링</td></tr>
+                <tr><td>카카오맵 SDK</td><td>지도, 마커, 폴리라인, 클러스터</td></tr>
+                <tr><td>Vercel</td><td>프로덕션 배포</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <h3>백엔드</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>기술</th><th>용도</th></tr></thead>
+              <tbody>
+                <tr><td>FastAPI 0.115</td><td>REST API 서버</td></tr>
+                <tr><td>Uvicorn</td><td>ASGI 서버</td></tr>
+                <tr><td>pandas ≥2.2</td><td>CSV 데이터 처리</td></tr>
+                <tr><td>numpy ≥1.26</td><td>수치 연산, 배열</td></tr>
+                <tr><td>scipy ≥1.13</td><td>cKDTree 공간 인덱싱</td></tr>
+                <tr><td>google-genai ≥1.0</td><td>Gemini API 클라이언트</td></tr>
+                <tr><td>httpx ≥0.27</td><td>TMAP API HTTP 호출</td></tr>
+                <tr><td>pydantic 2.10</td><td>요청/응답 모델 검증</td></tr>
+                <tr><td>Railway</td><td>프로덕션 배포</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <h3>외부 API</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>API</th><th>용도</th><th>인증</th></tr></thead>
+          <tbody>
+            <tr><td>TMAP 도보 API</td><td>경로 좌표 획득</td><td><code>TMAP_APP_KEY</code> 환경변수</td></tr>
+            <tr><td>TMAP POI 검색</td><td>장소 검색</td><td><code>TMAP_APP_KEY</code> 환경변수</td></tr>
+            <tr><td>Gemini 2.5 Flash</td><td>경로 AI 분석</td><td><code>GEMINI_API_KEY</code> 환경변수</td></tr>
+            <tr><td>카카오맵 SDK</td><td>지도 렌더링</td><td>카카오 앱 키 (프론트엔드 빌드 시 주입)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 12. 제약 및 한계 -->
+    <section id="constraints">
+      <h2><span class="sec-num">12</span>제약 및 한계</h2>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">데이터 커버리지</div>
+          <ul class="point-list">
+            <li>편의점·유흥시설·경찰서는 <strong>관악구</strong>만 적용 (동작구 미포함)</li>
+            <li>보안등 실시간 조회는 <strong>동작구</strong>만 적용 (관악구 격자 포함)</li>
+            <li>가로등 격자는 관악구+동작구 통합이나, 실시간 교체는 동작구 보안등만</li>
+            <li>데이터 최신성: 공공데이터 기준일 이후 변경 미반영</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-title">경로 알고리즘 한계</div>
+          <ul class="point-list">
+            <li>우회 포인트(W)는 수직 방향 100m 고정 — 실제 도로망 미고려</li>
+            <li>우회 호출 횟수 제한 없음 — 복잡한 경로에서 API 과다 호출 가능</li>
+            <li>TMAP 재호출 결과가 W를 실제로 지나지 않을 수 있음</li>
+            <li>일반경로가 안전경로보다 점수 높으면 fallback (두 경로 동일 표시)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-title">성능</div>
+          <ul class="point-list">
+            <li>격자 DataFrame·KDTree는 최초 요청 시 지연 로드 (Cold Start 지연)</li>
+            <li>경로 길이에 따라 100m 간격 샘플링 + KDTree 조회 횟수 선형 증가</li>
+            <li>Railway 무료 플랜은 비활성 시 슬립 — 첫 요청 지연 가능</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-title">UI 단일 컴포넌트</div>
+          <ul class="point-list">
+            <li>전체 UI 로직이 <code>App.tsx</code> 단일 파일에 집중</li>
+            <li>컴포넌트 분리 없어 기능 추가 시 파일 규모 증가</li>
+            <li>상태 관리 라이브러리 미사용 (useState만 사용)</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>알려진 동작 특이사항</h3>
+      <div class="warn-box">
+        ⚠️ <strong>일반경로 미표시 현상</strong>: 안전경로 fallback이 발생하면 두 경로가 동일한 좌표를 가집니다.
+        이 경우 안전경로(파란색) 폴리라인이 일반경로(회색) 위에 겹쳐 일반경로가 보이지 않는 것처럼 보일 수 있습니다.
+      </div>
+    </section>
+
+    <footer style="border-top:1px solid var(--gray-200); padding-top:24px; margin-top:40px; color:var(--gray-400); font-size:12px;">
+      Safe Route Sinlim 기능명세서 · 2025-05-01 · kim jeongwoo
+    </footer>
+
+  </div>
+</div>
+
+</body>
+</html>

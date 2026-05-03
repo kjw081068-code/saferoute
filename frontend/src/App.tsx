@@ -42,7 +42,7 @@ function clusterCountText(count: number): string {
 }
 
 /** CCTV=파랑, 가로등=주황, 유흥업소=빨강 계열 — 클러스터 원만으로 구분 */
-function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertainment' | 'convenience' | 'police'): Array<Record<string, string>> {
+function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertainment' | 'convenience' | 'police' | 'open24'): Array<Record<string, string>> {
   const fills: [string, string, string, string, string] =
     kind === 'cctv'
       ? [
@@ -83,6 +83,14 @@ function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertai
           'rgba(147, 51, 234, 0.94)',
           'rgba(126, 34, 206, 0.95)',
           'rgba(107, 33, 168, 0.96)',
+        ]
+      : kind === 'open24'
+      ? [
+          'rgba(60, 60, 60, 0.92)',
+          'rgba(40, 40, 40, 0.93)',
+          'rgba(25, 25, 25, 0.95)',
+          'rgba(10, 10, 10, 0.96)',
+          'rgba(0, 0, 0, 0.97)',
         ]
       : [
           'rgba(103, 232, 249, 0.92)',
@@ -340,6 +348,7 @@ type MapPointSafety = {
   cctv_count: number;
   light_count: number;
   conv_count: number;
+  open24_count: number;
   ent_count: number;
   police_count: number;
 };
@@ -483,12 +492,15 @@ function App() {
   const entMarkersRef = useRef<KakaoMarker[]>([]);
   const convMarkersRef = useRef<KakaoMarker[]>([]);
   const policeMarkersRef = useRef<KakaoMarker[]>([]);
+  const open24MarkersRef = useRef<KakaoMarker[]>([]);
+  const open24ClustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const showCctvRef = useRef(false);
   const showStreetlightRef = useRef(false);
   const showSafelightRef = useRef(false);
   const showEntRef = useRef(false);
   const showConvRef = useRef(false);
   const showPoliceRef = useRef(false);
+  const showOpen24Ref = useRef(false);
   const geocoderRef = useRef<Geocoder | null>(null);
   const originCoordRef = useRef<{ lat: number; lng: number } | null>(null);
   /** `watchPosition` 반환 id — 언마운트·중지 시 clearWatch */
@@ -507,6 +519,7 @@ function App() {
   const [showEnt, setShowEnt] = useState(false);
   const [showConv, setShowConv] = useState(false);
   const [showPolice, setShowPolice] = useState(false);
+  const [showOpen24, setShowOpen24] = useState(false);
   const [origin, setOrigin] = useState<LocationField>(emptyLocation);
   const [destination, setDestination] = useState<LocationField>(emptyLocation);
   const [originQuery, setOriginQuery] = useState('');
@@ -643,6 +656,7 @@ function App() {
   showEntRef.current = showEnt;
   showConvRef.current = showConv;
   showPoliceRef.current = showPolice;
+  showOpen24Ref.current = showOpen24;
 
   safetyFetchHandlerRef.current = (lat: number, lng: number) => {
     void (async () => {
@@ -657,7 +671,16 @@ function App() {
         if (!res.ok) {
           throw new Error(`서버 응답 ${res.status}`);
         }
-        const data = (await res.json()) as { score?: unknown; grade?: unknown; cctv_count?: unknown; light_count?: unknown; conv_count?: unknown; ent_count?: unknown; police_count?: unknown };
+        const data = (await res.json()) as {
+          score?: unknown;
+          grade?: unknown;
+          cctv_count?: unknown;
+          light_count?: unknown;
+          conv_count?: unknown;
+          open24_count?: unknown;
+          ent_count?: unknown;
+          police_count?: unknown;
+        };
         const score = Number(data.score);
         const grade = typeof data.grade === 'string' ? data.grade.trim() : '';
         if (!Number.isFinite(score) || !grade) {
@@ -668,6 +691,7 @@ function App() {
           cctv_count: Number(data.cctv_count ?? 0),
           light_count: Number(data.light_count ?? 0),
           conv_count: Number(data.conv_count ?? 0),
+          open24_count: Number(data.open24_count ?? 0),
           ent_count: Number(data.ent_count ?? 0),
           police_count: Number(data.police_count ?? 0),
         });
@@ -1095,6 +1119,11 @@ function App() {
           new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
           { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
         );
+        const open24Icon = new kakao.maps.MarkerImage(
+          `${base}/markers/open24-dot.svg`,
+          new kakao.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+          { offset: new kakao.maps.Point(MAP_DOT_SIZE / 2, MAP_DOT_SIZE / 2) }
+        );
 
         void (async () => {
           try {
@@ -1108,6 +1137,7 @@ function App() {
               entertainment: { lat: number; lng: number }[];
               convenience: { lat: number; lng: number }[];
               police: { lat: number; lng: number }[];
+              open24: { lat: number; lng: number }[];
             };
 
             const ClustererCtor = kakao.maps.MarkerClusterer;
@@ -1167,6 +1197,15 @@ function App() {
             );
             policeMarkersRef.current = policeMarkers;
 
+            const open24Markers = (data.open24 ?? []).map(
+              (pt) =>
+                new kakao.maps.Marker({
+                  position: new kakao.maps.LatLng(pt.lat, pt.lng),
+                  image: open24Icon,
+                })
+            );
+            open24MarkersRef.current = open24Markers;
+
             const mapNow = mapInstanceRef.current;
             /** 1 = 모든 줌에서 클러스터 활성(레벨↑ 축소할 때만 켜지던 현상 제거) */
             const clusterMinLevel = 1;
@@ -1224,12 +1263,22 @@ function App() {
               texts: clusterCountText,
               styles: clusterStylesFor('police'),
             });
+            const open24Cluster = new ClustererCtor({
+              map: null,
+              averageCenter: true,
+              minLevel: clusterMinLevel,
+              minClusterSize: 1,
+              calculator: CLUSTER_CALCULATOR,
+              texts: clusterCountText,
+              styles: clusterStylesFor('open24'),
+            });
             cctvClustererRef.current = cctvCluster;
             lightClustererRef.current = lightCluster;
             safelightClustererRef.current = safelightCluster;
             entClustererRef.current = entCluster;
             convClustererRef.current = convCluster;
             policeClustererRef.current = policeCluster;
+            open24ClustererRef.current = open24Cluster;
 
             if (mapNow) {
               if (showCctvRef.current) {
@@ -1256,6 +1305,10 @@ function App() {
                 policeCluster.addMarkers(policeMarkers);
                 policeCluster.setMap(mapNow);
               }
+              if (showOpen24Ref.current) {
+                open24Cluster.addMarkers(open24Markers);
+                open24Cluster.setMap(mapNow);
+              }
             }
           } catch (_) {
             // 정적 포인트 로드 실패 시 무시
@@ -1277,12 +1330,14 @@ function App() {
       entClustererRef.current?.setMap(null);
       convClustererRef.current?.setMap(null);
       policeClustererRef.current?.setMap(null);
+      open24ClustererRef.current?.setMap(null);
       cctvClustererRef.current = null;
       lightClustererRef.current = null;
       safelightClustererRef.current = null;
       entClustererRef.current = null;
       convClustererRef.current = null;
       policeClustererRef.current = null;
+      open24ClustererRef.current = null;
       if (el) {
         el.innerHTML = '';
       }
@@ -1362,6 +1417,18 @@ function App() {
     } else {
       policeMarkersRef.current.forEach((m) => m.setMap(null));
       policeClustererRef.current?.clear();
+    }
+  };
+
+  const toggleOpen24 = () => {
+    const next = !showOpen24;
+    setShowOpen24(next);
+    if (next) {
+      open24ClustererRef.current?.addMarkers(open24MarkersRef.current);
+      open24ClustererRef.current?.setMap(mapInstanceRef.current);
+    } else {
+      open24MarkersRef.current.forEach((m) => m.setMap(null));
+      open24ClustererRef.current?.clear();
     }
   };
 
@@ -1773,6 +1840,9 @@ function App() {
                 <span>편의점</span><span>{mapPointSafety.conv_count}개</span>
               </div>
               <div className={styles.safetyDetailRow}>
+                <span>24시간 점포</span><span>{mapPointSafety.open24_count}개</span>
+              </div>
+              <div className={styles.safetyDetailRow}>
                 <span>유흥업소</span><span>{mapPointSafety.ent_count}개</span>
               </div>
               <div className={styles.safetyDetailRow}>
@@ -1891,6 +1961,14 @@ function App() {
               aria-pressed={showPolice}
             >
               🚔 경찰서
+            </button>
+            <button
+              type="button"
+              className={`${styles.layerToggleBtn} ${showOpen24 ? styles.layerToggleBtnOpen24 : styles.layerToggleBtnOff}`}
+              onClick={toggleOpen24}
+              aria-pressed={showOpen24}
+            >
+              🌙 24시
             </button>
           </div>
 

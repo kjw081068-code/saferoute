@@ -1,6 +1,8 @@
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -23,37 +25,46 @@ CONVENIENCE_DONGJAK_CSV_PATH  = Path(__file__).parents[1] / "data" / "convenienc
 POLICE_DONGJAK_CSV_PATH       = Path(__file__).parents[1] / "data" / "police_dongjak.csv"
 # ENTERTAINMENT_GWANAK_CSV_PATH = Path(__file__).parents[1] / "data" / "entertainment_gwanak.csv"  # 관악구 비활성화
 ENTERTAINMENT_DONGJAK_CSV_PATH= Path(__file__).parents[1] / "data" / "entertainment_dongjak.csv"
+OPEN24_DONGJAK_CSV_PATH = Path(__file__).parents[1] / "data" / "open24_dongjak.csv"
 
 # 서울 기준 위경도→미터 변환 상수
 _REF_LAT = 37.47
 _LAT_M = 111_320
 _LNG_M = 111_320 * math.cos(math.radians(_REF_LAT))
 
-# 절대 등급 임계값
-_GRADE_DANGER_THRESH = 40.0
-_GRADE_SAFE_THRESH   = 60.0
+# 가중합 점수 S에 대한 등급(예전 총점 40/60과 동치: S = 옛 총점 − 40)
+_GRADE_SCORE_DANGER_LT = 0.0   # S < 0 → 위험 (옛 총점 < 40)
+_GRADE_SCORE_SAFE_GE = 20.0    # S ≥ 20 → 안전 (옛 총점 ≥ 60)
 
-# 기본 안전점수
-_BASE_SCORE = 40.0
+# 편의점·24시 점포: 한국시 22:00~익일 08:00 전까지만 반경 실제 반영, 그 외(낮)에는 각 항목 cap 만점 고정
+_TZ_SEOUL = ZoneInfo("Asia/Seoul")
+_STORE_RADIUS_M = 100.0
+_STORE_CAP = 2
+_STORE_WEIGHT = 3.5
+_STORE_LAYER_MAX_SCORE = float(_STORE_CAP) * _STORE_WEIGHT  # 7.0
+
+
+def store_proximity_night_window_kst(now: Optional[datetime] = None) -> bool:
+    """True면 야간(22시~익일 8시 미만): 편의점·24시 점포를 실제 반경으로 반영.
+    False면 주간(8시~22시 미만): 두 항목 모두 cap 만점만 적용(데이터 없으면 0).
+    """
+    t = now or datetime.now(_TZ_SEOUL)
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=_TZ_SEOUL)
+    else:
+        t = t.astimezone(_TZ_SEOUL)
+    h = t.hour
+    return h >= 22 or h < 8
+
 
 _cctv_tree: Optional[cKDTree] = None
 _cctv_qty: Optional[np.ndarray] = None
 _safelight_tree: Optional[cKDTree] = None
 _streetlight_tree: Optional[cKDTree] = None
 _convenience_tree: Optional[cKDTree] = None
+_open24_tree: Optional[cKDTree] = None
 _police_tree: Optional[cKDTree] = None
 _entertainment_tree: Optional[cKDTree] = None
-
-
-def _diminishing_score(count: float, base: float) -> float:
-    """체감 수익 감소 점수: n번째 개체는 base × 0.5^(n-1), 수렴 최대 = base × 2"""
-    score, mult, rem = 0.0, 1.0, float(count)
-    while rem >= 0.001:
-        take = min(1.0, rem)
-        score += base * mult * take
-        mult *= 0.5
-        rem -= take
-    return score
 
 
 def _load_cctv() -> None:
@@ -161,13 +172,43 @@ def _load_convenience() -> None:
     _convenience_tree = cKDTree(np.column_stack([xs, ys]))
 
 
-def _convenience_score_for_coord(lat: float, lng: float, radius_m: float = 100.0) -> float:
-    """반경 100m 내 편의점 cap=2 × 3.5(max 7)."""
+def _load_open24() -> None:
+    """24시간 영업 등 점포 CSV → KDTree (편의점과 동일 가중치 규칙용)."""
+    global _open24_tree
+    if _open24_tree is not None:
+        return
+    if not OPEN24_DONGJAK_CSV_PATH.exists():
+        _open24_tree = None
+        return
+    df = pd.read_csv(OPEN24_DONGJAK_CSV_PATH, encoding="utf-8-sig").dropna(subset=["lat", "lng"])
+    if len(df) == 0:
+        _open24_tree = None
+        return
+    xs = df["lng"].values * _LNG_M
+    ys = df["lat"].values * _LAT_M
+    _open24_tree = cKDTree(np.column_stack([xs, ys]))
+
+
+def _combined_conv_open24_score_for_coord(lat: float, lng: float, radius_m: float = _STORE_RADIUS_M) -> float:
+    """편의점 + 24시 점포를 한 레이어로: 반경 내 개수 합 min(합, 2) × 3.5 (최대 7점).
+
+    주간(한국시 08~22): 두 데이터 중 하나라도 있으면 항상 max 7점(둘 다 없으면 0).
+    야간(22~익일 08): 편의점 개수 + 24시 점포 개수를 합쳐 cap 2까지 반영.
+    """
     _load_convenience()
-    if _convenience_tree is None:
+    _load_open24()
+    has_any = (_convenience_tree is not None) or (_open24_tree is not None)
+    if not has_any:
         return 0.0
-    idxs = _convenience_tree.query_ball_point([lng * _LNG_M, lat * _LAT_M], r=radius_m)
-    return min(len(idxs), 2) * 3.5
+    if not store_proximity_night_window_kst():
+        return _STORE_LAYER_MAX_SCORE
+    xy = [lng * _LNG_M, lat * _LAT_M]
+    n = 0
+    if _convenience_tree is not None:
+        n += len(_convenience_tree.query_ball_point(xy, r=radius_m))
+    if _open24_tree is not None:
+        n += len(_open24_tree.query_ball_point(xy, r=radius_m))
+    return min(n, _STORE_CAP) * _STORE_WEIGHT
 
 
 def _load_police() -> None:
@@ -225,12 +266,13 @@ def _entertainment_score_for_coord(lat: float, lng: float, radius_m: float = 50.
 
 
 def score_to_grade_realtime(score: float) -> str:
-    """고정 절대 임계값으로 점수를 등급으로 변환합니다.
-    위험: <40 / 보통: 40~60 / 안전: >=60
+    """가중합 점수 S를 등급으로 변환합니다.
+    예전(기본 40 포함 총점 T) 기준 T<40 / 40≤T<60 / T≥60 과 동일하게,
+    S = T − 40 이면 S<0 / 0≤S<20 / S≥20 입니다.
     """
-    if score < _GRADE_DANGER_THRESH:
+    if score < _GRADE_SCORE_DANGER_LT:
         return "위험"
-    if score < _GRADE_SAFE_THRESH:
+    if score < _GRADE_SCORE_SAFE_GE:
         return "보통"
     return "안전"
 
@@ -243,6 +285,7 @@ class SafetyScore(BaseModel):
     cctv_count: int
     light_count: int
     conv_count: int
+    open24_count: int
     ent_count: int
     police_count: int
 
@@ -282,19 +325,17 @@ def get_safety_score(
     _load_streetlight()
     _load_safelight()
     _load_convenience()
+    _load_open24()
     _load_police()
     _load_entertainment()
 
     x, y = lng * _LNG_M, lat * _LAT_M
 
-    # CCTV qty 합산 (30m 직접감시 + 70m 경로추적 이중 반경)
+    # CCTV 30m 반경 수량 합(표시용; 점수는 _cctv_score_for_coord와 동일 로직)
     cctv_qty = 0.0
-    cctv_qty_far = 0.0
     if _cctv_tree is not None and len(_cctv_qty) > 0:
         idxs_near = _cctv_tree.query_ball_point([x, y], r=30.0)
-        idxs_far  = _cctv_tree.query_ball_point([x, y], r=70.0)
-        cctv_qty     = float(_cctv_qty[list(idxs_near)].sum()) if idxs_near else 0.0
-        cctv_qty_far = float(_cctv_qty[list(idxs_far)].sum())  if idxs_far  else 0.0
+        cctv_qty = float(_cctv_qty[list(idxs_near)].sum()) if idxs_near else 0.0
 
     # 가로등 개수
     street_count = 0
@@ -306,10 +347,15 @@ def get_safety_score(
     if _safelight_tree is not None:
         safe_count = len(_safelight_tree.query_ball_point([x, y], r=5.0))
 
-    # 편의점 개수
+    # 편의점 개수(표시용; 점수의 야간 반경과 동일)
     conv_count = 0
     if _convenience_tree is not None:
-        conv_count = len(_convenience_tree.query_ball_point([x, y], r=100.0))
+        conv_count = len(_convenience_tree.query_ball_point([x, y], r=_STORE_RADIUS_M))
+
+    # 24시간 점포 개수(표시용)
+    open24_count = 0
+    if _open24_tree is not None:
+        open24_count = len(_open24_tree.query_ball_point([x, y], r=_STORE_RADIUS_M))
 
     # 경찰서 개수
     police_count = 0
@@ -321,16 +367,13 @@ def get_safety_score(
     if _entertainment_tree is not None:
         ent_count = len(_entertainment_tree.query_ball_point([x, y], r=50.0))
 
-    score = max(
-        _BASE_SCORE
-        + min(cctv_qty, 2) * 6.0
-        + min(cctv_qty_far, 2) * 3.5
-        + min(street_count, 2) * 5.5
-        + min(safe_count, 1) * 4.0
-        + min(conv_count, 2) * 3.5
-        + min(police_count, 1) * 14.0
-        - min(ent_count, 2) * 7.5,
-        10.0,
+    score = (
+        _cctv_score_for_coord(lat, lng)
+        + _streetlight_score_for_coord(lat, lng)
+        + _safelight_score_for_coord(lat, lng, radius_m=5.0)
+        + _combined_conv_open24_score_for_coord(lat, lng)
+        + _police_score_for_coord(lat, lng)
+        - _entertainment_score_for_coord(lat, lng)
     )
 
     return SafetyScore(
@@ -341,6 +384,7 @@ def get_safety_score(
         cctv_count=round(cctv_qty),
         light_count=street_count + safe_count,
         conv_count=conv_count,
+        open24_count=open24_count,
         ent_count=ent_count,
         police_count=police_count,
     )

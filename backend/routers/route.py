@@ -8,7 +8,8 @@ from pydantic import BaseModel
 
 from routers.safety import (
     _cctv_score_for_coord, _safelight_score_for_coord,
-    _streetlight_score_for_coord, _convenience_score_for_coord,
+    _streetlight_score_for_coord,
+    _combined_conv_open24_score_for_coord,
     _police_score_for_coord, _entertainment_score_for_coord,
     score_to_grade_realtime,
 )
@@ -120,15 +121,13 @@ def _sample_coords(
 
 def _score_for_coord(lat: float, lng: float) -> Tuple[float, str]:
     """모든 요소를 실시간 반경으로 직접 계산해 안전점수를 반환합니다."""
-    score = max(
-        40.0
-        + _cctv_score_for_coord(lat, lng)
+    score = (
+        _cctv_score_for_coord(lat, lng)
         + _streetlight_score_for_coord(lat, lng)
         + _safelight_score_for_coord(lat, lng, radius_m=5.0)
-        + _convenience_score_for_coord(lat, lng)
+        + _combined_conv_open24_score_for_coord(lat, lng)
         + _police_score_for_coord(lat, lng)
-        - _entertainment_score_for_coord(lat, lng),
-        10.0,
+        - _entertainment_score_for_coord(lat, lng)
     )
     return score, score_to_grade_realtime(score)
 
