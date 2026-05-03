@@ -213,6 +213,39 @@ function closestPointIndexFrom(points: number[][], lat: number, lng: number, fro
   return best;
 }
 
+/** 경로에서 같은 지점을 두 번 지나는 루프 구간을 제거합니다.
+ * - proximityM(5m): GPS 오차 수준으로 엄격하게 설정해 정상 경로를 자르지 않음
+ * - minLoopM(80m): 그 사이 경로 길이가 80m 이상일 때만 진짜 루프로 판단
+ */
+function removeLoops(points: number[][], proximityM = 5, minLoopM = 80): number[][] {
+  const distM = (a: number[], b: number[]) => {
+    const dlat = (b[0] - a[0]) * 111000;
+    const dlng = (b[1] - a[1]) * 88000;
+    return Math.sqrt(dlat * dlat + dlng * dlng);
+  };
+  const pathLen = (pts: number[][], from: number, to: number): number => {
+    let len = 0;
+    for (let k = from; k < to; k++) len += distM(pts[k], pts[k + 1]);
+    return len;
+  };
+  let result = [...points];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const n = result.length;
+    outer: for (let i = 0; i < n - 2; i++) {
+      for (let j = i + 2; j < n; j++) {
+        if (distM(result[i], result[j]) <= proximityM && pathLen(result, i, j) >= minLoopM) {
+          result = [...result.slice(0, i + 1), ...result.slice(j)];
+          changed = true;
+          break outer;
+        }
+      }
+    }
+  }
+  return result;
+}
+
 /** 구간별 score 기준 다색 Polyline 생성 (안전경로용) */
 function buildSegmentColorPolylines(
   maps: KakaoGlobal['maps'],
@@ -773,7 +806,7 @@ function App() {
           if (id === 'normal') {
             nextPolylines[id] = buildSingleColorPolylines(kakaoMaps, r.points, NORMAL_ROUTE_BLUE);
           } else {
-            nextPolylines[id] = buildSegmentColorPolylines(kakaoMaps, r.points, r.segments);
+            nextPolylines[id] = buildSegmentColorPolylines(kakaoMaps, removeLoops(r.points), r.segments);
           }
         }
         routePolylinesRef.current = nextPolylines;
