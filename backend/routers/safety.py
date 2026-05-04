@@ -35,14 +35,17 @@ _LNG_M = 111_320 * math.cos(math.radians(_REF_LAT))
 
 # 가중합 점수 S에 대한 등급(예전 총점 40/60과 동치: S = 옛 총점 − 40)
 _GRADE_SCORE_DANGER_LT = 0.0   # S < 0 → 위험 (옛 총점 < 40)
-_GRADE_SCORE_SAFE_GE = 20.0    # S ≥ 20 → 안전 (옛 총점 ≥ 60)
+_GRADE_SCORE_SAFE_GE = 16.0    # S ≥ 16 → 안전
 
-# 편의점·24시 점포: 한국시 22:00~익일 08:00 전까지만 반경 실제 반영, 그 외(낮)에는 각 항목 cap 만점 고정
+# 편의점·24시 점포: 야간(22~08시) base=3.5(수렴 11.67점) / 주간(08~22시) base=2.0(수렴 6.67점, 약한 상권 신호)
 _TZ_SEOUL = ZoneInfo("Asia/Seoul")
 _STORE_RADIUS_M = 150.0
-_STORE_CAP = 2
-_STORE_WEIGHT = 3.5
-_STORE_LAYER_MAX_SCORE = 10.0
+_STORE_WEIGHT_NIGHT = 3.5   # 야간 체감 base (수렴 11.67점)
+_STORE_WEIGHT_DAY   = 2.0   # 주간 체감 base (수렴 6.67점)
+_STORE_RATE = 0.3
+
+# 주간 활동성 보너스: 자연광·사람들의 자연 감시 효과
+_DAYTIME_ACTIVITY_BONUS = 6.0
 
 
 def store_proximity_night_window_kst(now: Optional[datetime] = None) -> bool:
@@ -136,8 +139,10 @@ def _load_safelight() -> None:
     _safelight_tree = cKDTree(np.column_stack([xs, ys]))
 
 
-def _safelight_score_for_coord(lat: float, lng: float, radius_m: float = 10.0) -> float:
-    """반경 10m 내 보안등 cap=1 × 4.0(max 4)."""
+def _safelight_score_for_coord(lat: float, lng: float, radius_m: float = 18.0) -> float:
+    """야간(22~08시)에만 반경 18m 내 보안등 cap=1 × 4.0. 주간에는 0점."""
+    if not store_proximity_night_window_kst():
+        return 0.0
     _load_safelight()
     if _safelight_tree is None:
         return 0.0
@@ -164,8 +169,10 @@ def _load_streetlight() -> None:
     _streetlight_tree = cKDTree(np.column_stack([xs, ys]))
 
 
-def _streetlight_score_for_coord(lat: float, lng: float, radius_m: float = 25.0) -> float:
-    """반경 25m 내 가로등 cap=2 × 5.5(max 11)."""
+def _streetlight_score_for_coord(lat: float, lng: float, radius_m: float = 35.0) -> float:
+    """야간(22~08시)에만 반경 35m 내 가로등 cap=2 × 5.5. 주간에는 0점."""
+    if not store_proximity_night_window_kst():
+        return 0.0
     _load_streetlight()
     if _streetlight_tree is None:
         return 0.0
@@ -208,26 +215,36 @@ def _load_open24() -> None:
     _open24_tree = cKDTree(np.column_stack([xs, ys]))
 
 
-def _combined_conv_open24_score_for_coord(lat: float, lng: float, radius_m: float = _STORE_RADIUS_M) -> float:
-    """편의점 + 24시 점포를 한 레이어로: 반경 내 개수 합 min(합, 2) × 3.5 (최대 7점).
+def _diminishing_score(count: float, base: float, rate: float = 0.5) -> float:
+    """한계편익체감 점수: n번째 개체는 base × (1-rate)^(n-1), 수렴 최대 = base / rate."""
+    score, mult, rem = 0.0, 1.0, float(count)
+    while rem >= 0.001:
+        take = min(1.0, rem)
+        score += base * mult * take
+        mult *= (1.0 - rate)
+        rem -= take
+    return score
 
-    주간(한국시 08~22): 두 데이터 중 하나라도 있으면 항상 max 7점(둘 다 없으면 0).
-    야간(22~익일 08): 편의점 개수 + 24시 점포 개수를 합쳐 cap 2까지 반영.
+
+def _combined_conv_open24_score_for_coord(lat: float, lng: float, radius_m: float = _STORE_RADIUS_M) -> float:
+    """편의점 + 24시 점포를 한 레이어로 한계편익체감 적용.
+
+    야간(22~08시): base=3.5, 수렴 11.67점 (안전 요소로 강하게 반영)
+    주간(08~22시): base=2.0, 수렴 6.67점 (상권 활성화 약한 신호만 반영)
     """
     _load_convenience()
     _load_open24()
     has_any = (_convenience_tree is not None) or (_open24_tree is not None)
     if not has_any:
         return 0.0
-    if not store_proximity_night_window_kst():
-        return _STORE_LAYER_MAX_SCORE
     xy = [lng * _LNG_M, lat * _LAT_M]
     n = 0
     if _convenience_tree is not None:
         n += len(_convenience_tree.query_ball_point(xy, r=radius_m))
     if _open24_tree is not None:
         n += len(_open24_tree.query_ball_point(xy, r=radius_m))
-    return min(n, _STORE_CAP) * _STORE_WEIGHT
+    weight = _STORE_WEIGHT_NIGHT if store_proximity_night_window_kst() else _STORE_WEIGHT_DAY
+    return _diminishing_score(n, weight, rate=_STORE_RATE)
 
 
 def _load_police() -> None:
@@ -249,12 +266,14 @@ def _load_police() -> None:
 
 
 def _police_score_for_coord(lat: float, lng: float, radius_m: float = 200.0) -> float:
-    """반경 200m 내 경찰서 cap=1 × 14.0(max 14)."""
+    """가장 가까운 경찰서까지 거리 비례 감쇄 (0m=14점, 200m=0점)."""
     _load_police()
     if _police_tree is None:
         return 0.0
-    idxs = _police_tree.query_ball_point([lng * _LNG_M, lat * _LAT_M], r=radius_m)
-    return min(len(idxs), 1) * 14.0
+    dist, _ = _police_tree.query([lng * _LNG_M, lat * _LAT_M], k=1)
+    if dist >= radius_m:
+        return 0.0
+    return 14.0 * (1.0 - dist / radius_m)
 
 
 def _load_firestation() -> None:
@@ -273,12 +292,14 @@ def _load_firestation() -> None:
 
 
 def _firestation_score_for_coord(lat: float, lng: float, radius_m: float = 300.0) -> float:
-    """반경 300m 내 소방서 cap=1 × 10.5(경찰서 14점의 75%, max 10.5점)."""
+    """가장 가까운 소방서까지 거리 비례 감쇄 (0m=10.5점, 300m=0점)."""
     _load_firestation()
     if _firestation_tree is None:
         return 0.0
-    idxs = _firestation_tree.query_ball_point([lng * _LNG_M, lat * _LAT_M], r=radius_m)
-    return min(len(idxs), 1) * 10.5
+    dist, _ = _firestation_tree.query([lng * _LNG_M, lat * _LAT_M], k=1)
+    if dist >= radius_m:
+        return 0.0
+    return 10.5 * (1.0 - dist / radius_m)
 
 
 def _load_entertainment() -> None:
@@ -300,12 +321,18 @@ def _load_entertainment() -> None:
 
 
 def _entertainment_score_for_coord(lat: float, lng: float, radius_m: float = 50.0) -> float:
-    """반경 50m 내 유흥주점 cap=2 × 7.5(max 15 감점)."""
+    """반경 50m 내 유흥주점 감점. 야간에는 ×1.5 가중치 (주간 max 15점, 야간 max 22.5점)."""
     _load_entertainment()
     if _entertainment_tree is None:
         return 0.0
     idxs = _entertainment_tree.query_ball_point([lng * _LNG_M, lat * _LAT_M], r=radius_m)
-    return min(len(idxs), 2) * 7.5
+    base = min(len(idxs), 2) * 7.5
+    return base * 2.5 if store_proximity_night_window_kst() else base
+
+
+def _daytime_activity_bonus() -> float:
+    """주간(08~22시) 활동성 보너스. 야간에는 0점."""
+    return 0.0 if store_proximity_night_window_kst() else _DAYTIME_ACTIVITY_BONUS
 
 
 def score_to_grade_realtime(score: float) -> str:
@@ -313,7 +340,7 @@ def score_to_grade_realtime(score: float) -> str:
     예전(기본 40 포함 총점 T) 기준 T<40 / 40≤T<60 / T≥60 과 동일하게,
     S = T − 40 이면 S<0 / 0≤S<20 / S≥20 입니다.
     """
-    if score < _GRADE_SCORE_DANGER_LT:
+    if score <= _GRADE_SCORE_DANGER_LT:
         return "위험"
     if score < _GRADE_SCORE_SAFE_GE:
         return "보통"
@@ -418,9 +445,10 @@ def get_safety_score(
         ent_count = len(_entertainment_tree.query_ball_point([x, y], r=50.0))
 
     score = (
-        _cctv_score_for_coord(lat, lng)
+        _daytime_activity_bonus()
+        + _cctv_score_for_coord(lat, lng)
         + _streetlight_score_for_coord(lat, lng)
-        + _safelight_score_for_coord(lat, lng, radius_m=10.0)
+        + _safelight_score_for_coord(lat, lng, radius_m=18.0)
         + _combined_conv_open24_score_for_coord(lat, lng)
         + _police_score_for_coord(lat, lng)
         + _firestation_score_for_coord(lat, lng)

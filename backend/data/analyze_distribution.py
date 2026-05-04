@@ -32,12 +32,16 @@ _LNG_M = 111_320 * math.cos(math.radians(_REF_LAT))
 
 # 현재 실서버 임계값
 DANGER_THRESH = 0.0
-SAFE_THRESH   = 20.0
+SAFE_THRESH   = 16.0
 
-# 편의점/24시 주간 고정점수
-STORE_DAY_SCORE = 10.0
-STORE_CAP       = 2
-STORE_WEIGHT    = 3.5
+# 편의점/24시: 야간 base=3.5(수렴 11.67) / 주간 base=2.0(수렴 6.67)
+STORE_WEIGHT_NIGHT = 3.5
+STORE_WEIGHT_DAY   = 2.0
+STORE_RATE         = 0.3
+
+# 주간 활동성 보너스 / 야간 유흥 가중치
+DAYTIME_BONUS          = 6.0
+ENT_NIGHT_MULTIPLIER   = 2.5
 
 
 def load_tree(path: Path, qty_col: str = None):
@@ -62,13 +66,13 @@ def build_grid():
     return grid_lat.ravel(), grid_lng.ravel(), len(lats), len(lngs)
 
 
-def _dim(count: float, base: float) -> float:
-    """체감수익감소: base × (1 + 0.5 + 0.25 + ...), cap 없음."""
+def _dim(count: float, base: float, rate: float = 0.5) -> float:
+    """한계편익체감: n번째 개체는 base × (1-rate)^(n-1), 수렴 최대 = base / rate."""
     score, mult, rem = 0.0, 1.0, float(count)
     while rem >= 0.001:
         take = min(1.0, rem)
         score += base * mult * take
-        mult *= 0.5
+        mult *= (1.0 - rate)
         rem -= take
     return score
 
@@ -83,7 +87,7 @@ def batch_scores(grid_lat, grid_lng, trees, daytime: bool):
     n = len(grid_lat)
     scores = np.zeros(n)
 
-    # CCTV 30m: 1개=12점, 2개 이상=18점 / 30~100m: 체감감소 base=6
+    # CCTV 30m: 1개=12점, 2개 이상=18점 / 30~100m: 체감 50% base=6
     if cctv_tree is not None:
         near_list = cctv_tree.query_ball_point(pts, r=30.0)
         far_list  = cctv_tree.query_ball_point(pts, r=100.0)
@@ -98,60 +102,65 @@ def batch_scores(grid_lat, grid_lng, trees, daytime: bool):
                 near_score = 12.0
             else:
                 near_score = 0.0
-            scores[i] += near_score + _dim(qty_f, 6.0)
+            scores[i] += near_score + _dim(min(qty_f, 3.0), 6.0)
 
-    # 가로등 (반경 25m, 체감감소 base=5.5)
-    if streetlight_tree is not None:
-        for i, idxs in enumerate(streetlight_tree.query_ball_point(pts, r=25.0)):
-            scores[i] += _dim(len(idxs), 5.5)
+    # 가로등 (야간 전용, 반경 35m, cap=2 × 5.5)
+    if not daytime and streetlight_tree is not None:
+        for i, idxs in enumerate(streetlight_tree.query_ball_point(pts, r=35.0)):
+            scores[i] += min(len(idxs), 2) * 5.5
 
-    # 보안등 (반경 10m, 체감감소 base=4.0)
-    if safelight_tree is not None:
-        for i, idxs in enumerate(safelight_tree.query_ball_point(pts, r=10.0)):
-            scores[i] += _dim(len(idxs), 4.0)
+    # 보안등 (야간 전용, 반경 18m, cap=1 × 4.0)
+    if not daytime and safelight_tree is not None:
+        for i, idxs in enumerate(safelight_tree.query_ball_point(pts, r=18.0)):
+            scores[i] += min(len(idxs), 1) * 4.0
 
-    # 편의점+24시 (주간: 고정 10점 / 야간: 반경 150m, 체감감소 base=3.5)
+    # 주간 활동성 보너스
+    if daytime:
+        scores += DAYTIME_BONUS
+
+    # 편의점+24시 (주간: base=2.0 / 야간: base=3.5, 공통 반경 150m 체감 30%)
     has_store = (conv_tree is not None) or (open24_tree is not None)
     if has_store:
-        if daytime:
-            scores += STORE_DAY_SCORE
-        else:
-            for i, pt in enumerate(pts):
-                cnt = 0
-                if conv_tree is not None:
-                    cnt += len(conv_tree.query_ball_point(pt, r=150.0))
-                if open24_tree is not None:
-                    cnt += len(open24_tree.query_ball_point(pt, r=150.0))
-                scores[i] += _dim(cnt, 3.5)
+        w = STORE_WEIGHT_DAY if daytime else STORE_WEIGHT_NIGHT
+        for i, pt in enumerate(pts):
+            cnt = 0
+            if conv_tree is not None:
+                cnt += len(conv_tree.query_ball_point(pt, r=150.0))
+            if open24_tree is not None:
+                cnt += len(open24_tree.query_ball_point(pt, r=150.0))
+            scores[i] += _dim(cnt, w, rate=STORE_RATE)
 
-    # 경찰서 (반경 300m, 체감감소 base=14.0)
+    # 경찰서 (반경 200m, 거리 비례 감쇄, 최대 14점)
     if police_tree is not None:
-        for i, idxs in enumerate(police_tree.query_ball_point(pts, r=300.0)):
-            scores[i] += _dim(len(idxs), 14.0)
+        dists, _ = police_tree.query(pts, k=1)
+        mask = dists < 200.0
+        scores[mask] += 14.0 * (1.0 - dists[mask] / 200.0)
 
-    # 소방서 (반경 300m, cap=1, 10.5점)
+    # 소방서 (반경 300m, 거리 비례 감쇄, 최대 10.5점)
     if firestation_tree is not None:
-        for i, idxs in enumerate(firestation_tree.query_ball_point(pts, r=300.0)):
-            scores[i] += min(len(idxs), 1) * 10.5
+        dists, _ = firestation_tree.query(pts, k=1)
+        mask = dists < 300.0
+        scores[mask] += 10.5 * (1.0 - dists[mask] / 300.0)
 
-    # 유흥주점 (반경 100m, 체감감소 base=7.5, 감점)
+    # 유흥주점 (반경 50m, cap=2 × 7.5, 야간 ×1.5 감점)
     if ent_tree is not None:
-        for i, idxs in enumerate(ent_tree.query_ball_point(pts, r=100.0)):
-            scores[i] -= _dim(len(idxs), 7.5)
+        mult = ENT_NIGHT_MULTIPLIER if not daytime else 1.0
+        for i, idxs in enumerate(ent_tree.query_ball_point(pts, r=50.0)):
+            scores[i] -= min(len(idxs), 2) * 7.5 * mult
 
     return scores
 
 
 def print_hist(label: str, scores: np.ndarray):
     n = len(scores)
-    danger = int(np.sum(scores < DANGER_THRESH))
+    danger = int(np.sum(scores <= DANGER_THRESH))
     safe   = int(np.sum(scores >= SAFE_THRESH))
     normal = n - danger - safe
 
     print(f"\n{'='*50}")
     print(f"[{label}]  총 {n:,}개 격자")
     print(f"{'='*50}")
-    print(f"  위험 (S<{DANGER_THRESH:g}):        {danger:6,}개  {danger/n*100:5.1f}%")
+    print(f"  위험 (S<={DANGER_THRESH:g}):       {danger:6,}개  {danger/n*100:5.1f}%")
     print(f"  보통 ({DANGER_THRESH:g}≤S<{SAFE_THRESH:g}):   {normal:6,}개  {normal/n*100:5.1f}%")
     print(f"  안전 (S≥{SAFE_THRESH:g}):         {safe:6,}개  {safe/n*100:5.1f}%")
     print(f"  최소={scores.min():.1f}  최대={scores.max():.1f}  평균={scores.mean():.1f}  중앙={np.median(scores):.1f}")
@@ -202,8 +211,8 @@ def main():
     scores_night = batch_scores(grid_lat, grid_lng, trees, daytime=False)
     print("  야간 완료.")
 
-    print_hist("주간 (08~22시, 편의점 고정 10점)", scores_day)
-    print_hist("야간 (22~08시, 편의점 실제 반경)", scores_night)
+    print_hist("주간 (08~22시, 가로등 0 + 활동보너스 +9)", scores_day)
+    print_hist("야간 (22~08시, 가로등 반영 + 유흥 ×1.5)", scores_night)
 
     print("\n=== 분석 완료 ===")
 
