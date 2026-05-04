@@ -49,8 +49,8 @@ _DAYTIME_ACTIVITY_BONUS = 6.0
 
 
 def store_proximity_night_window_kst(now: Optional[datetime] = None) -> bool:
-    """True면 야간(22시~익일 8시 미만): 편의점·24시 점포를 실제 반경으로 반영.
-    False면 주간(8시~22시 미만): 두 항목 모두 cap 만점만 적용(데이터 없으면 0).
+    """True면 야간(20시~익일 7시 미만): 편의점·24시 점포를 실제 반경으로 반영.
+    False면 주간(7시~20시 미만): 두 항목 모두 cap 만점만 적용(데이터 없으면 0).
     """
     t = now or datetime.now(_TZ_SEOUL)
     if t.tzinfo is None:
@@ -58,7 +58,7 @@ def store_proximity_night_window_kst(now: Optional[datetime] = None) -> bool:
     else:
         t = t.astimezone(_TZ_SEOUL)
     h = t.hour
-    return h >= 22 or h < 8
+    return h >= 20 or h < 7
 
 
 _cctv_tree: Optional[cKDTree] = None
