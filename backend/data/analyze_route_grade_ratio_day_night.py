@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
+import numpy as np
+
 # backend 루트에서 routers import
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -76,13 +78,18 @@ def load_path_csv(path: Path) -> List[Tuple[float, float]]:
     return pts
 
 
-def count_grades(points: List[Tuple[float, float]], is_night: bool) -> Tuple[int, int, int, int]:
+def collect_scores_and_grades(
+    points: List[Tuple[float, float]], is_night: bool
+) -> Tuple[List[float], Tuple[int, int, int, int]]:
+    """점수 목록 + (위험, 보통, 안전, 기타) 개수. 등급은 `score_to_grade_realtime`와 동일."""
     orig = sm.store_proximity_night_window_kst
     sm.store_proximity_night_window_kst = lambda now=None: is_night  # noqa: ARG005
+    scores: List[float] = []
     try:
         danger = normal = safe = other = 0
         for lat, lng in points:
-            _, grade = _score_for_coord(lat, lng)
+            sc, grade = _score_for_coord(lat, lng)
+            scores.append(float(sc))
             b = grade_bucket(grade)
             if b == "위험":
                 danger += 1
@@ -92,9 +99,14 @@ def count_grades(points: List[Tuple[float, float]], is_night: bool) -> Tuple[int
                 safe += 1
             else:
                 other += 1
-        return danger, normal, safe, other
+        return scores, (danger, normal, safe, other)
     finally:
         sm.store_proximity_night_window_kst = orig
+
+
+def count_grades(points: List[Tuple[float, float]], is_night: bool) -> Tuple[int, int, int, int]:
+    _, counts = collect_scores_and_grades(points, is_night)
+    return counts
 
 
 def print_ratio(label: str, danger: int, normal: int, safe: int, other: int) -> None:
@@ -108,6 +120,85 @@ def print_ratio(label: str, danger: int, normal: int, safe: int, other: int) -> 
         print(f"  {name}: {c} ({pct:.2f}%)")
 
 
+def print_score_summary(scores: List[float]) -> None:
+    if not scores:
+        print("  점수 요약: 샘플 없음")
+        return
+    arr = np.array(scores, dtype=float)
+    qs = [0, 5, 10, 25, 50, 75, 90, 95, 100]
+    pct = np.percentile(arr, qs)
+    print("  점수 요약 (분위):")
+    print(
+        f"    min={arr.min():.2f}  "
+        + "  ".join(f"p{q}={pct[i]:.2f}" for i, q in enumerate(qs) if q not in (0, 100))
+        + f"  max={arr.max():.2f}  mean={arr.mean():.2f}"
+    )
+
+
+def print_ascii_histogram(title: str, scores: List[float], bins: int = 28, bar_width: int = 46) -> None:
+    """터미널용 텍스트 히스토그램(막대는 #)."""
+    if not scores:
+        print(f"\n--- {title}: 히스토그램 생략(점 없음) ---")
+        return
+    arr = np.array(scores, dtype=float)
+    counts, edges = np.histogram(arr, bins=bins)
+    mx = int(counts.max()) if counts.size else 0
+    mx = mx if mx > 0 else 1
+    print(f"\n--- {title} 점수 히스토그램 ({bins}구간, 막대 최대폭={bar_width}) ---")
+    for i in range(len(counts)):
+        lo, hi = float(edges[i]), float(edges[i + 1])
+        c = int(counts[i])
+        bar_len = int(bar_width * c / mx)
+        bar = "#" * bar_len
+        # 등급 경계 S=0, S=20이 [lo, hi) 안에 있으면 표시
+        tag = ""
+        if lo <= 0 < hi:
+            tag += "[S=0]"
+        if lo < 20 <= hi or (lo == 20 and hi > 20):
+            tag += "[S=20]"
+        extra = f" {tag}" if tag else ""
+        print(f"  [{lo:7.2f},{hi:7.2f}) {c:5d} |{bar}{extra}")
+
+
+def print_ascii_histogram_fixed_bin_width(
+    title: str,
+    scores: List[float],
+    bin_width: float = 2.0,
+    bar_width: int = 46,
+) -> None:
+    """터미널용 텍스트 히스토그램(고정 구간폭, 예: 2점 단위)."""
+    if not scores:
+        print(f"\n--- {title}: 히스토그램 생략(점 없음) ---")
+        return
+    if bin_width <= 0:
+        raise ValueError("bin_width는 0보다 커야 합니다.")
+
+    arr = np.array(scores, dtype=float)
+    lo = math.floor(float(arr.min()) / bin_width) * bin_width
+    hi = math.ceil(float(arr.max()) / bin_width) * bin_width
+    edges = np.arange(lo, hi + bin_width, bin_width, dtype=float)
+    counts, edges = np.histogram(arr, bins=edges)
+
+    mx = int(counts.max()) if counts.size else 0
+    mx = mx if mx > 0 else 1
+
+    print(f"\n--- {title} 점수 히스토그램 ({bin_width:g}점 단위, 막대 최대폭={bar_width}) ---")
+    for i in range(len(counts)):
+        a = float(edges[i])
+        b = float(edges[i + 1])
+        c = int(counts[i])
+        bar_len = int(bar_width * c / mx)
+        bar = "#" * bar_len
+
+        tag = ""
+        if a <= 0 < b:
+            tag += "[S=0]"
+        if a <= 20 < b:
+            tag += "[S=20]"
+        extra = f" {tag}" if tag else ""
+        print(f"  [{a:7.2f},{b:7.2f}) {c:5d} |{bar}{extra}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument(
@@ -117,6 +208,12 @@ def main() -> None:
         help="lat,lng 또는 lat,lng 컬럼 CSV. 없으면 동작구 100m 격자 사용.",
     )
     p.add_argument("--step-m", type=float, default=STEP_M, help="격자 간격(m), --path-csv 없을 때만")
+    p.add_argument(
+        "--bin-width",
+        type=float,
+        default=2.0,
+        help="히스토그램 구간폭(점수 단위). 예: 2면 2점 단위 히스토그램",
+    )
     args = p.parse_args()
 
     if args.path_csv:
@@ -126,11 +223,21 @@ def main() -> None:
         points = list(iter_grid_points(args.step_m))
         print(f"동작구 {args.step_m}m 격자 샘플: {len(points)}점")
 
-    d_n, n_n, s_n, o_n = count_grades(points, is_night=True)
-    d_d, n_d, s_d, o_d = count_grades(points, is_night=False)
+    print(
+        "\n등급 기준(safety.score_to_grade_realtime): "
+        "S < 0 위험 | 0 <= S < 20 보통 | S >= 20 안전"
+    )
+
+    scores_night, (d_n, n_n, s_n, o_n) = collect_scores_and_grades(points, is_night=True)
+    scores_day, (d_d, n_d, s_d, o_d) = collect_scores_and_grades(points, is_night=False)
 
     print_ratio("밤 모드 (편의점·24시 실측)", d_n, n_n, s_n, o_n)
+    print_score_summary(scores_night)
+    print_ascii_histogram_fixed_bin_width("밤 모드", scores_night, bin_width=args.bin_width)
+
     print_ratio("낮 모드 (편의점·24시 만점)", d_d, n_d, s_d, o_d)
+    print_score_summary(scores_day)
+    print_ascii_histogram_fixed_bin_width("낮 모드", scores_day, bin_width=args.bin_width)
 
 
 if __name__ == "__main__":
