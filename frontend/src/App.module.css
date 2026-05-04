@@ -779,6 +779,18 @@
   color: #fff;
 }
 
+.layerToggleBtnOpen24 {
+  background: rgba(30, 30, 30, 0.9);
+  border-color: #000;
+  color: #fff;
+}
+
+.layerToggleBtnFirestation {
+  background: rgba(239, 68, 68, 0.85);
+  border-color: #dc2626;
+  color: #fff;
+}
+
 .layerToggleBtnOff {
   background: rgba(40, 40, 40, 0.75);
   border-color: rgba(255, 255, 255, 0.15);
@@ -1251,7 +1263,9 @@
   .layerToggleBtnSafelight,
   .layerToggleBtnEnt,
   .layerToggleBtnConv,
-  .layerToggleBtnPolice {
+  .layerToggleBtnPolice,
+  .layerToggleBtnOpen24,
+  .layerToggleBtnFirestation {
     opacity: 0.78;
   }
 
