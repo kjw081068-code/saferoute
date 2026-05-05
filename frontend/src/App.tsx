@@ -1608,7 +1608,7 @@ function App() {
           <img src="/logo.jpg" alt="로고" className={styles.logoMark} />
           <div className={styles.brandTextCol}>
             <h1 className={styles.appName}>보통의하루</h1>
-            <p className={styles.appTagline}>안심 귀갓길 내비게이터</p>
+            <p className={styles.appTagline}>안심 귀갓길 내비게이터 in 동작구</p>
           </div>
           <div className={`${styles.brandActions} ${styles.mobileOnly}`}>
             <div className={styles.currentLocationBtnRow}>
@@ -1665,10 +1665,6 @@ function App() {
                   )}
                   {originTrackingActive ? '추적 중지' : '현재위치 추적'}
                 </button>
-                <div className={styles.sidebarClock} aria-label="현재 시각">
-                  <span className={styles.clockIcon} aria-hidden>{isNight(now) ? '🌙' : '☀️'}</span>
-                  <span className={styles.clockText}>{formatKoreanTime(now)}</span>
-                </div>
               </div>
               {originGeolocationError ? (
                 <div className={styles.currentLocationError} role="status" aria-live="polite">
