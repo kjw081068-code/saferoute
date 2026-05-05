@@ -136,16 +136,11 @@ def _score_for_coord(lat: float, lng: float) -> Tuple[float, str]:
     return score, score_to_grade_realtime(score)
 
 
-def _score_to_grade(segments: list) -> str:
-    """구간 등급 비율로 경로 전체 등급을 결정합니다 (상대평가 기반)."""
-    if not segments:
-        return "보통"
-    total = len(segments)
-    safe_cnt = sum(1 for s in segments if s.grade == "안전")
-    danger_cnt = sum(1 for s in segments if s.grade == "위험")
-    if danger_cnt / total >= 0.3:
+def _score_to_grade(avg_score: float) -> str:
+    """평균점수를 지도 클릭 기준과 동일하게 등급으로 변환합니다."""
+    if avg_score <= 0:
         return "위험"
-    if safe_cnt / total >= 0.5:
+    if avg_score >= 16:
         return "안전"
     return "보통"
 
@@ -256,7 +251,7 @@ def _build_route_result(
         score_sum += score
 
     avg_score = round(score_sum / len(segments), 1) if segments else 0.0
-    route_grade = _score_to_grade(segments)
+    route_grade = _score_to_grade(avg_score)
     points = [[lat, lng] for lat, lng in coords]
 
     return RouteResult(

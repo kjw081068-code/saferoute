@@ -357,8 +357,8 @@ function riskNoteFromRoute(r: ApiRouteResult): string {
 }
 
 function scoreBandClass(score: number): 'bandHigh' | 'bandMid' | 'bandLow' {
-  if (score >= 80) return 'bandHigh';
-  if (score >= 50) return 'bandMid';
+  if (score >= 16) return 'bandHigh';
+  if (score > 0) return 'bandMid';
   return 'bandLow';
 }
 
