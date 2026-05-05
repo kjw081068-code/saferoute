@@ -594,7 +594,6 @@ function App() {
   const [mapPointSafety, setMapPointSafety] = useState<MapPointSafety | null>(null);
   const [safetyLoading, setSafetyLoading] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
-  const [originGeolocationLoading, setOriginGeolocationLoading] = useState(false);
   const [originGeolocationError, setOriginGeolocationError] = useState<string | null>(null);
   const [originTrackingActive, setOriginTrackingActive] = useState(false);
   const [originTrackingLoading, setOriginTrackingLoading] = useState(false);
@@ -1522,55 +1521,6 @@ function App() {
   };
 
   /** Geolocation → coord2Address → 출발지·좌표·파란 마커·지도 중심 (1회) */
-  const handleUseCurrentLocation = useCallback(() => {
-    if (originTrackingActive) return;
-    const maps = window.kakao?.maps;
-    const geocoder = geocoderRef.current;
-    const map = mapInstanceRef.current;
-    if (!maps || !geocoder || !map) {
-      setOriginGeolocationError('지도가 아직 준비되지 않았습니다.');
-      return;
-    }
-    if (!navigator.geolocation) {
-      setOriginGeolocationError('이 브라우저에서는 위치 정보를 사용할 수 없습니다.');
-      return;
-    }
-
-    setOriginGeolocationError(null);
-    setOriginGeolocationLoading(true);
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        geocoder.coord2Address(lng, lat, (result, status) => {
-          setOriginGeolocationLoading(false);
-          if (status !== maps.services.Status.OK || !result?.length) {
-            setOriginGeolocationError('주소로 변환하지 못했습니다.');
-            return;
-          }
-          setOriginGeolocationError(null);
-          const loc = locationFromGeocodeResult(result[0]!);
-          setOrigin(loc);
-          setOriginQuery(formatLocationLabel(loc));
-          setOriginSuggestions([]);
-          lastOriginReverseGeocodeRef.current = { lat, lng, at: Date.now() };
-          syncOriginPinAndCenter(lat, lng, { level: MAP_LOCATION_FOLLOW_LEVEL });
-        });
-      },
-      (err) => {
-        setOriginGeolocationLoading(false);
-        // 1 = PERMISSION_DENIED
-        if (err.code === 1) {
-          setOriginGeolocationError('위치 권한을 허용해주세요');
-        } else {
-          setOriginGeolocationError('현재 위치를 가져오지 못했습니다.');
-        }
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
-  }, [originTrackingActive, syncOriginPinAndCenter]);
-
   /** 실시간 추적: watchPosition으로 마커·지도 중심 갱신, 주소는 스로틀 역지오코딩 */
   const handleToggleOriginTracking = useCallback(() => {
     if (originTrackingActive) {
@@ -1664,21 +1614,6 @@ function App() {
             <div className={styles.currentLocationBtnRow}>
               <button
                 type="button"
-                className={styles.currentLocationBtn}
-                onClick={handleUseCurrentLocation}
-                disabled={originGeolocationLoading || originTrackingActive || originTrackingLoading}
-                aria-busy={originGeolocationLoading}
-                aria-label="현재 위치로 출발지 설정"
-              >
-                {originGeolocationLoading ? (
-                  <span className={styles.geoSpinner} aria-hidden />
-                ) : (
-                  <span aria-hidden>📍</span>
-                )}
-                현재 위치
-              </button>
-              <button
-                type="button"
                 className={`${styles.currentLocationBtn} ${styles.currentLocationBtnTrack} ${
                   originTrackingActive ? styles.currentLocationBtnTrackOn : ''
                 }`}
@@ -1686,14 +1621,14 @@ function App() {
                 disabled={originTrackingLoading && !originTrackingActive}
                 aria-busy={originTrackingLoading && !originTrackingActive}
                 aria-pressed={originTrackingActive}
-                aria-label={originTrackingActive ? '실시간 위치 추적 중지' : '실시간 위치 추적 시작'}
+                aria-label={originTrackingActive ? '현재위치 추적 중지' : '현재위치 추적 시작'}
               >
                 {originTrackingLoading && !originTrackingActive ? (
                   <span className={styles.geoSpinner} aria-hidden />
                 ) : (
-                  <span aria-hidden>{originTrackingActive ? '⏹' : '📡'}</span>
+                  <span aria-hidden>{originTrackingActive ? '⏹' : '📍'}</span>
                 )}
-                {originTrackingActive ? '추적 중지' : '실시간 추적'}
+                {originTrackingActive ? '추적 중지' : '현재위치 추적'}
               </button>
             </div>
             {originGeolocationError ? (
@@ -1714,21 +1649,6 @@ function App() {
               <div className={styles.currentLocationBtnRow}>
                 <button
                   type="button"
-                  className={styles.currentLocationBtn}
-                  onClick={handleUseCurrentLocation}
-                  disabled={originGeolocationLoading || originTrackingActive || originTrackingLoading}
-                  aria-busy={originGeolocationLoading}
-                  aria-label="현재 위치로 출발지 설정"
-                >
-                  {originGeolocationLoading ? (
-                    <span className={styles.geoSpinner} aria-hidden />
-                  ) : (
-                    <span aria-hidden>📍</span>
-                  )}
-                  현재 위치
-                </button>
-                <button
-                  type="button"
                   className={`${styles.currentLocationBtn} ${styles.currentLocationBtnTrack} ${
                     originTrackingActive ? styles.currentLocationBtnTrackOn : ''
                   }`}
@@ -1736,15 +1656,19 @@ function App() {
                   disabled={originTrackingLoading && !originTrackingActive}
                   aria-busy={originTrackingLoading && !originTrackingActive}
                   aria-pressed={originTrackingActive}
-                  aria-label={originTrackingActive ? '실시간 위치 추적 중지' : '실시간 위치 추적 시작'}
+                  aria-label={originTrackingActive ? '현재위치 추적 중지' : '현재위치 추적 시작'}
                 >
                   {originTrackingLoading && !originTrackingActive ? (
                     <span className={styles.geoSpinner} aria-hidden />
                   ) : (
-                    <span aria-hidden>{originTrackingActive ? '⏹' : '📡'}</span>
+                    <span aria-hidden>{originTrackingActive ? '⏹' : '📍'}</span>
                   )}
-                  {originTrackingActive ? '추적 중지' : '실시간 추적'}
+                  {originTrackingActive ? '추적 중지' : '현재위치 추적'}
                 </button>
+                <div className={styles.sidebarClock} aria-label="현재 시각">
+                  <span className={styles.clockIcon} aria-hidden>{isNight(now) ? '🌙' : '☀️'}</span>
+                  <span className={styles.clockText}>{formatKoreanTime(now)}</span>
+                </div>
               </div>
               {originGeolocationError ? (
                 <div className={styles.currentLocationError} role="status" aria-live="polite">
@@ -1842,12 +1766,17 @@ function App() {
             onClick={handleFindRoute}
             disabled={!canSearch || routeFetchLoading}
           >
-            {routeFetchLoading ? '경로 찾는 중…' : '안전 경로 찾기'}
+            {routeFetchLoading ? '경로 찾는 중…' : (
+              <>
+                <span className={styles.desktopOnly}>안전 경로 찾기</span>
+                <span className={styles.mobileOnly}>경로탐색</span>
+              </>
+            )}
           </button>
         </div>
         </div>
 
-        <div className={styles.sidebarBottom}>
+        <div className={`${styles.sidebarBottom} ${!hasSearched && !routeFetchLoading ? styles.sidebarBottomHidden : ''}`}>
         <section className={styles.routeSection} aria-label="경로 비교">
           {!hasSearched ? (
             <div className={styles.emptyState}>
@@ -1856,7 +1785,10 @@ function App() {
               「안전 경로 찾기」를 눌러주세요.
             </div>
           ) : routeFetchLoading ? (
-            <div className={styles.emptyState}>경로를 불러오는 중입니다…</div>
+            <div className={styles.routeLoadingBox}>
+              <div className={styles.mapSpinner} />
+              <span>경로를 불러오는 중입니다</span>
+            </div>
           ) : routeFetchError ? (
             <div className={styles.safetyPanelError}>{routeFetchError}</div>
           ) : routes.length === 0 ? (
@@ -1949,7 +1881,7 @@ function App() {
         </div>
       </aside>
 
-      <main className={styles.mapArea}>
+      <main className={`${styles.mapArea} ${!hasSearched && !routeFetchLoading ? styles.mapAreaExpanded : ''}`}>
         {selectedRoute && (
           <div className={`${styles.mapBottomLeftStack} ${styles.desktopOnlyMapStack}`} aria-live="polite">
             <AiSafetyPanel
@@ -1994,9 +1926,7 @@ function App() {
         )}
 
         <div className={styles.topRightClock} aria-label="현재 시각">
-          <span className={styles.clockIcon} aria-hidden>
-            {isNight(now) ? '🌙' : '☀️'}
-          </span>
+          <span className={styles.clockIcon} aria-hidden>{isNight(now) ? '🌙' : '☀️'}</span>
           <span className={styles.clockText}>{formatKoreanTime(now)}</span>
         </div>
 
