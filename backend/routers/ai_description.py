@@ -41,7 +41,10 @@ def _get_segment_detail(lat: float, lng: float, score: float, grade: str) -> dic
     _safety._load_streetlight()
     _safety._load_safelight()
     _safety._load_convenience()
+    _safety._load_open24()
     _safety._load_entertainment()
+    _safety._load_police()
+    _safety._load_firestation()
 
     x, y = lng * _safety._LNG_M, lat * _safety._LAT_M
 
@@ -52,19 +55,31 @@ def _get_segment_detail(lat: float, lng: float, score: float, grade: str) -> dic
 
     street_count = 0
     if _safety._streetlight_tree is not None:
-        street_count = len(_safety._streetlight_tree.query_ball_point([x, y], r=20.0))
+        street_count = len(_safety._streetlight_tree.query_ball_point([x, y], r=30.0))
 
     safe_count = 0
     if _safety._safelight_tree is not None:
-        safe_count = len(_safety._safelight_tree.query_ball_point([x, y], r=5.0))
+        safe_count = len(_safety._safelight_tree.query_ball_point([x, y], r=10.0))
 
     conv_count = 0
     if _safety._convenience_tree is not None:
-        conv_count = len(_safety._convenience_tree.query_ball_point([x, y], r=100.0))
+        conv_count = len(_safety._convenience_tree.query_ball_point([x, y], r=_safety._STORE_RADIUS_M))
+
+    open24_count = 0
+    if _safety._open24_tree is not None:
+        open24_count = len(_safety._open24_tree.query_ball_point([x, y], r=_safety._STORE_RADIUS_M))
 
     ent_count = 0
     if _safety._entertainment_tree is not None:
         ent_count = len(_safety._entertainment_tree.query_ball_point([x, y], r=50.0))
+
+    police_count = 0
+    if _safety._police_tree is not None:
+        police_count = len(_safety._police_tree.query_ball_point([x, y], r=200.0))
+
+    firestation_count = 0
+    if _safety._firestation_tree is not None:
+        firestation_count = len(_safety._firestation_tree.query_ball_point([x, y], r=300.0))
 
     return {
         "lat": lat,
@@ -72,9 +87,13 @@ def _get_segment_detail(lat: float, lng: float, score: float, grade: str) -> dic
         "score": score,
         "grade": grade,
         "cctv_count": cctv_count,
-        "light_count": street_count + safe_count,
+        "street_count": street_count,
+        "safe_count": safe_count,
         "conv_count": conv_count,
+        "open24_count": open24_count,
         "ent_count": ent_count,
+        "police_count": police_count,
+        "firestation_count": firestation_count,
     }
 
 
@@ -87,21 +106,26 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
     normal_segments = [d for d in details if d["grade"] == "보통"]
 
     total_cctv = sum(d["cctv_count"] for d in details)
-    total_light = sum(d["light_count"] for d in details)
+    total_street = sum(d["street_count"] for d in details)
+    total_safe = sum(d["safe_count"] for d in details)
     total_conv = sum(d["conv_count"] for d in details)
+    total_open24 = sum(d["open24_count"] for d in details)
     total_ent = sum(d["ent_count"] for d in details)
+    total_police = sum(d["police_count"] for d in details)
+    total_firestation = sum(d["firestation_count"] for d in details)
 
     avg_cctv = round(total_cctv / total, 1) if total else 0
-    avg_light = round(total_light / total, 1) if total else 0
+    avg_street = round(total_street / total, 1) if total else 0
+    avg_safe = round(total_safe / total, 1) if total else 0
 
     danger_info = ""
     if danger_segments:
         d_cctv = round(sum(d["cctv_count"] for d in danger_segments) / len(danger_segments), 1)
-        d_light = round(sum(d["light_count"] for d in danger_segments) / len(danger_segments), 1)
+        d_street = round(sum(d["street_count"] for d in danger_segments) / len(danger_segments), 1)
+        d_ent = round(sum(d["ent_count"] for d in danger_segments) / len(danger_segments), 1)
         danger_info = (
             f"- 위험 구간 수: {len(danger_segments)}개 (전체 {total}개 중)\n"
-            f"- 위험 구간 평균 CCTV 수: {d_cctv}개\n"
-            f"- 위험 구간 평균 가로등 수: {d_light}개\n"
+            f"- 위험 구간 평균 CCTV: {d_cctv}개, 가로등: {d_street}개, 유흥시설: {d_ent}개\n"
         )
 
     safe_segments = [d for d in details if d["grade"] == "안전"]
@@ -113,18 +137,21 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
 [경로 데이터]
 - 전체 구간: {total}개 / 안전 {len(safe_segments)}개 / 보통 {len(normal_segments)}개 / 위험 {len(danger_segments)}개
 - 평균 안전점수: {avg_score}점 ({grade} 등급)
-- 경로 전체 CCTV 평균: 구간당 {avg_cctv}개
-- 경로 전체 가로등 평균: 구간당 {avg_light}개
-- 경로 내 편의점: {total_conv}개, 유흥시설: {total_ent}개
+- CCTV 평균: 구간당 {avg_cctv}개
+- 가로등 평균: 구간당 {avg_street}개 / 보안등 평균: 구간당 {avg_safe}개
+- 편의점: {total_conv}개 / 24시간 점포: {total_open24}개
+- 경찰서·지구대: {total_police}개 / 소방서: {total_firestation}개
+- 유흥시설: {total_ent}개
 {danger_info}
 [작성 규칙]
 - safe_points·warning_points: 반드시 실제 수치(CCTV 몇 개, 가로등 몇 개 등)를 인용해서 이유를 설명할 것
 - safe_points와 warning_points는 뚜렷한 장·단점이 있을 때만 작성하고, 없으면 빈 배열 []로 둘 것
 - safe_points와 warning_points는 각각 최대 2개까지만 작성할 것
 - 유흥시설이 많으면 야간 주취자 위험도 언급할 것
+- 경찰서·소방서가 있으면 긴급상황 대응 측면에서 언급할 것
 - ai_summary 규칙:
   1. safe_points·warning_points에서 이미 언급한 내용은 절대 반복하지 말 것
-  2. 점수·등급·구간 수·CCTV 수·가로등 수·편의점 수 등 수치는 일절 포함하지 말 것 (UI에서 별도 표시됨)
+  2. 점수·등급·구간 수·각종 시설 수 등 수치는 일절 포함하지 말 것 (UI에서 별도 표시됨)
   3. 이 경로를 실제로 걷는 보행자에게 필요한 핵심 행동 조언만 작성할 것
   4. 2문장 이내, 절대 초과 금지
 

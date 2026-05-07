@@ -139,8 +139,8 @@ def _load_safelight() -> None:
     _safelight_tree = cKDTree(np.column_stack([xs, ys]))
 
 
-def _safelight_score_for_coord(lat: float, lng: float, radius_m: float = 18.0) -> float:
-    """야간(22~08시)에만 반경 18m 내 보안등 cap=1 × 4.0. 주간에는 0점."""
+def _safelight_score_for_coord(lat: float, lng: float, radius_m: float = 10.0) -> float:
+    """야간(22~08시)에만 반경 10m 내 보안등 cap=1 × 4.0. 주간에는 0점."""
     if not store_proximity_night_window_kst():
         return 0.0
     _load_safelight()
@@ -169,8 +169,8 @@ def _load_streetlight() -> None:
     _streetlight_tree = cKDTree(np.column_stack([xs, ys]))
 
 
-def _streetlight_score_for_coord(lat: float, lng: float, radius_m: float = 35.0) -> float:
-    """야간(22~08시)에만 반경 35m 내 가로등 cap=2 × 5.5. 주간에는 0점."""
+def _streetlight_score_for_coord(lat: float, lng: float, radius_m: float = 30.0) -> float:
+    """야간(22~08시)에만 반경 30m 내 가로등 cap=2 × 5.5. 주간에는 0점."""
     if not store_proximity_night_window_kst():
         return 0.0
     _load_streetlight()
@@ -412,12 +412,12 @@ def get_safety_score(
     # 가로등 개수
     street_count = 0
     if _streetlight_tree is not None:
-        street_count = len(_streetlight_tree.query_ball_point([x, y], r=20.0))
+        street_count = len(_streetlight_tree.query_ball_point([x, y], r=30.0))
 
     # 보안등 개수
     safe_count = 0
     if _safelight_tree is not None:
-        safe_count = len(_safelight_tree.query_ball_point([x, y], r=5.0))
+        safe_count = len(_safelight_tree.query_ball_point([x, y], r=10.0))
 
     # 편의점 개수(표시용; 점수의 야간 반경과 동일)
     conv_count = 0

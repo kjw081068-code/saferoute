@@ -1601,7 +1601,7 @@ function App() {
   ]);
 
   return (
-    <div className={styles.app}>
+    <div className={styles.app} style={(hasSearched || routeFetchLoading) ? undefined : { '--mobileBottomSheetH': '0px' } as React.CSSProperties}>
       <aside className={styles.sidebar}>
         <div className={styles.sidebarTop}>
         <header className={styles.brandBlock}>
@@ -1806,11 +1806,10 @@ function App() {
                       <div className={styles.routeCardHeader}>
                         <span className={styles.routeCardTitle}>{r.title}</span>
                         <span className={`${styles.routeScore} ${styles[`score_${band}`]}`}>
-                          평균 {r.avg_score}점
+                          {r.grade}
                         </span>
                       </div>
                       <div className={styles.routeCardMeta}>
-                        <span className={styles.routeGrade}>등급 {r.grade}</span>
                         <span className={styles.routeTime}>소요 {r.duration}분</span>
                       </div>
                     </button>

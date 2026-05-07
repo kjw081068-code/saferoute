@@ -556,7 +556,7 @@
 
 .routeScore {
   font-weight: 800;
-  font-size: 15px;
+  font-size: 18px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1345,7 +1345,7 @@
 
   .topRightClock {
     top: auto;
-    bottom: 8px;
+    bottom: calc(8px + var(--mobileBottomSheetH, 0px));
     right: 12px;
     z-index: 12;
   }
@@ -1435,6 +1435,10 @@
 
   .routeCard {
     padding: 10px 12px 8px;
+  }
+
+  .routeScore {
+    font-size: 18px;
   }
 
   .safetyPanel {
