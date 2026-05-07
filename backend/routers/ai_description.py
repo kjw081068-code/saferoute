@@ -137,8 +137,8 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
 [경로 데이터]
 - 전체 구간: {total}개 / 안전 {len(safe_segments)}개 / 보통 {len(normal_segments)}개 / 위험 {len(danger_segments)}개
 - 평균 안전점수: {avg_score}점 ({grade} 등급)
-- CCTV 평균: 구간당 {avg_cctv}개
-- 가로등 평균: 구간당 {avg_street}개 / 보안등 평균: 구간당 {avg_safe}개
+- CCTV 평균: 50m당 {avg_cctv}개
+- 가로등 평균: 50m당 {avg_street}개 / 보안등 평균: 50m당 {avg_safe}개
 - 편의점: {total_conv}개 / 24시간 점포: {total_open24}개
 - 경찰서·지구대: {total_police}개 / 소방서: {total_firestation}개
 - 유흥시설: {total_ent}개
