@@ -143,12 +143,25 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
 - 경찰서·지구대: {total_police}개 / 소방서: {total_firestation}개
 - 유흥시설: {total_ent}개
 {danger_info}
+[언급 우선순위 — 1개당 안전점수 기여 높은 순]
+1순위: 경찰서·지구대 (1개당 14점)
+2순위: 소방서 (1개당 10.5점)
+3순위: 편의점·24시간 점포 (1개당 7.5점)
+4순위: CCTV 근거리 (1개당 12점)
+5순위: CCTV 원거리 (1개당 6점)
+6순위: 가로등 (1개당 5.5점)
+7순위: 보안등 (1개당 4점)
+감점: 유흥시설 (1개당 -7.5점)
+
 [작성 규칙]
-- safe_points·warning_points: 반드시 실제 수치(CCTV 몇 개, 가로등 몇 개 등)를 인용해서 이유를 설명할 것
+- safe_points·warning_points는 위 우선순위 순서대로 언급할 것 (높은 가중치 요소부터)
+- 반드시 실제 수치(CCTV 몇 개, 가로등 몇 개 등)를 인용해서 이유를 설명할 것
+- 조명 언급 시 가로등보다 보안등(야간 밀착 조명) 위주로 언급할 것
 - safe_points와 warning_points는 뚜렷한 장·단점이 있을 때만 작성하고, 없으면 빈 배열 []로 둘 것
-- safe_points와 warning_points는 각각 최대 2개까지만 작성할 것
-- 유흥시설이 많으면 야간 주취자 위험도 언급할 것
-- 경찰서·소방서가 있으면 긴급상황 대응 측면에서 언급할 것
+- safe_points와 warning_points는 각각 최대 3개까지 작성할 수 있음
+- 경찰서·지구대가 1개 이상 있으면 반드시 safe_points에 포함할 것
+- 소방서가 1개 이상 있으면 반드시 safe_points에 포함할 것
+- 유흥시설이 많으면 야간 주취자 위험도 warning_points에 언급할 것
 - ai_summary 규칙:
   1. safe_points·warning_points에서 이미 언급한 내용은 절대 반복하지 말 것
   2. 점수·등급·구간 수·각종 시설 수 등 수치는 일절 포함하지 말 것 (UI에서 별도 표시됨)
