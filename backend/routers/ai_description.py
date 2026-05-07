@@ -156,11 +156,13 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
 [작성 규칙]
 - safe_points·warning_points는 위 우선순위 순서대로 언급할 것 (높은 가중치 요소부터)
 - 반드시 실제 수치(CCTV 몇 개, 가로등 몇 개 등)를 인용해서 이유를 설명할 것
-- 조명 언급 시 가로등보다 보안등(야간 밀착 조명) 위주로 언급할 것
+- 조명 언급 시 가로등(avg_street)과 보안등(avg_safe) 중 수치가 더 많은 쪽을 위주로 언급할 것
+- 조명 부족을 warning_points에 쓸 때는 가로등·보안등 둘 다 부족한 경우에만 언급할 것
 - safe_points와 warning_points는 뚜렷한 장·단점이 있을 때만 작성하고, 없으면 빈 배열 []로 둘 것
 - safe_points와 warning_points는 각각 최대 3개까지 작성할 수 있음
 - 경찰서·지구대가 1개 이상 있으면 반드시 safe_points에 포함할 것
-- 소방서가 1개 이상 있으면 반드시 safe_points에 포함할 것
+- 소방서가 1개 이상 있으면 반드시 safe_points에 포함할 것 (화재가 아닌 야간 안전 신고·긴급 대응 가능 관점으로 서술)
+- 소방서가 0개면 야간 안전 신고 공백 관점으로 warning_points에 포함할 것 (화재 언급 금지)
 - 유흥시설이 많으면 야간 주취자 위험도 warning_points에 언급할 것
 - ai_summary 규칙:
   1. safe_points·warning_points에서 이미 언급한 내용은 절대 반복하지 말 것
@@ -170,8 +172,8 @@ def _build_prompt(details: List[dict], avg_score: float, grade: str) -> str:
 
 [응답 JSON 형식 - 이 JSON만 출력, 다른 텍스트 절대 금지]
 {{
-  "safe_points": ["장점 문장 (최대 2개, 없으면 빈 배열)"],
-  "warning_points": ["위험/단점 문장 (최대 2개, 없으면 빈 배열)"],
+  "safe_points": ["장점 문장 (최대 3개, 없으면 빈 배열)"],
+  "warning_points": ["위험/단점 문장 (최대 3개, 없으면 빈 배열)"],
   "ai_summary": "핵심 행동 조언 (2문장 이내, 수치 포함 금지)"
 }}"""
 
