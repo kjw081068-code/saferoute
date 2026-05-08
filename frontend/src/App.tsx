@@ -94,11 +94,11 @@ function clusterStylesFor(kind: 'cctv' | 'streetlight' | 'safelight' | 'entertai
         ]
       : kind === 'firestation'
       ? [
-          'rgba(239, 68, 68, 0.9)',
-          'rgba(220, 38, 38, 0.92)',
-          'rgba(185, 28, 28, 0.94)',
-          'rgba(153, 27, 27, 0.95)',
-          'rgba(127, 29, 29, 0.96)',
+          'rgba(249, 115, 22, 0.9)',
+          'rgba(234, 88, 12, 0.92)',
+          'rgba(194, 65, 12, 0.94)',
+          'rgba(154, 52, 18, 0.95)',
+          'rgba(124, 45, 18, 0.96)',
         ]
       : [
           'rgba(103, 232, 249, 0.92)',
@@ -390,10 +390,12 @@ type MapPointSafety = {
   lng: number;
   cctv_count: number;
   light_count: number;
+  safe_count: number;
   conv_count: number;
   open24_count: number;
   ent_count: number;
   police_count: number;
+  firestation_count: number;
 };
 
 /** 백엔드 grade → UI 색상 구분 */
@@ -723,10 +725,12 @@ function App() {
           grade?: unknown;
           cctv_count?: unknown;
           light_count?: unknown;
+          safe_count?: unknown;
           conv_count?: unknown;
           open24_count?: unknown;
           ent_count?: unknown;
           police_count?: unknown;
+          firestation_count?: unknown;
         };
         const score = Number(data.score);
         const grade = typeof data.grade === 'string' ? data.grade.trim() : '';
@@ -737,10 +741,12 @@ function App() {
           score, grade, lat, lng,
           cctv_count: Number(data.cctv_count ?? 0),
           light_count: Number(data.light_count ?? 0),
+          safe_count: Number(data.safe_count ?? 0),
           conv_count: Number(data.conv_count ?? 0),
           open24_count: Number(data.open24_count ?? 0),
           ent_count: Number(data.ent_count ?? 0),
           police_count: Number(data.police_count ?? 0),
+          firestation_count: Number(data.firestation_count ?? 0),
         });
       } catch (e) {
         setMapPointSafety(null);
@@ -1856,9 +1862,11 @@ function App() {
                 {([
                   { label: 'CCTV', value: mapPointSafety.cctv_count, unit: '대', neg: false },
                   { label: '가로등', value: mapPointSafety.light_count, unit: '개', neg: false },
+                  { label: '보안등', value: mapPointSafety.safe_count, unit: '개', neg: false },
                   { label: '편의점', value: mapPointSafety.conv_count, unit: '개', neg: false },
                   { label: '24시간 점포', value: mapPointSafety.open24_count, unit: '개', neg: false },
                   { label: '경찰서·지구대', value: mapPointSafety.police_count, unit: '개', neg: false },
+                  { label: '소방서', value: mapPointSafety.firestation_count, unit: '개', neg: false },
                   { label: '유흥업소', value: mapPointSafety.ent_count, unit: '개', neg: true },
                 ] as { label: string; value: number; unit: string; neg: boolean }[]).map(({ label, value, unit, neg }) => {
                   const present = value > 0;

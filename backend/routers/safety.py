@@ -354,6 +354,7 @@ class SafetyScore(BaseModel):
     grade: str
     cctv_count: int
     light_count: int
+    safe_count: int
     conv_count: int
     open24_count: int
     ent_count: int
@@ -461,7 +462,8 @@ def get_safety_score(
         score=round(score, 1),
         grade=score_to_grade_realtime(score),
         cctv_count=round(cctv_qty),
-        light_count=street_count + safe_count,
+        light_count=street_count,
+        safe_count=safe_count,
         conv_count=conv_count,
         open24_count=open24_count,
         ent_count=ent_count,
