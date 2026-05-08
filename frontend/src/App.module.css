@@ -427,10 +427,9 @@
 .safetyPanelBody {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
-.safetyScoreRow,
 .safetyGradeRow {
   display: flex;
   align-items: center;
@@ -438,16 +437,9 @@
   gap: 10px;
 }
 
-.safetyScoreLabel,
 .safetyGradeLabel {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
-}
-
-.safetyScoreValue {
-  font-size: 20px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
 }
 
 .safetyGradeBadge {
@@ -459,17 +451,56 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.safetyDetailRow {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-  padding: 2px 0;
+.safetyChips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
 }
+
+.safetyChip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.safetyChipPos {
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.22);
+}
+
+.safetyChipNeg {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.safetyChipOff {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.safetyChipLabel {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.safetyChipValue {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.safetyChipValPos { color: #4ade80; }
+.safetyChipValNeg { color: #f87171; }
+.safetyChipValOff { color: rgba(255, 255, 255, 0.25); }
 
 .safetyCoords {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.35);
   font-variant-numeric: tabular-nums;
 }
 
@@ -589,6 +620,12 @@
 
 .routeTime {
   font-variant-numeric: tabular-nums;
+}
+
+.routeDist {
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.85em;
 }
 
 .riskPanel {

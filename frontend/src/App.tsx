@@ -144,6 +144,7 @@ type RouteCardData = {
   avg_score: number;
   grade: string;
   duration: number;
+  distance_m: number;
   riskNote: string;
 };
 
@@ -189,6 +190,7 @@ type ApiRouteResult = {
   avg_score: number;
   grade: string;
   duration: number;
+  distance_m: number;
 };
 
 const ROUTE_STROKE_WEIGHT = 6;
@@ -762,6 +764,7 @@ function App() {
         avg_score: r.avg_score,
         grade: r.grade,
         duration: r.duration,
+        distance_m: r.distance_m ?? 0,
         riskNote: riskNoteFromRoute(r),
       }));
   }, [routeApiResults]);
@@ -1420,6 +1423,14 @@ function App() {
     };
   }, []);
 
+  // 하단 시트 열림/닫힘 시 지도 크기 재계산
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      mapInstanceRef.current?.relayout();
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [hasSearched, routeFetchLoading]);
+
   const panMap = (dx: number, dy: number) => {
     mapInstanceRef.current?.panBy(dx, dy);
   };
@@ -1811,6 +1822,11 @@ function App() {
                       </div>
                       <div className={styles.routeCardMeta}>
                         <span className={styles.routeTime}>소요 {r.duration}분</span>
+                        <span className={styles.routeDist}>
+                          {r.distance_m >= 1000
+                            ? `${(r.distance_m / 1000).toFixed(1)}km`
+                            : `${r.distance_m}m`}
+                        </span>
                       </div>
                     </button>
                   );
@@ -1826,18 +1842,8 @@ function App() {
           {!safetyLoading && safetyError && <div className={styles.safetyPanelError}>{safetyError}</div>}
           {!safetyLoading && !safetyError && mapPointSafety && (
             <div className={styles.safetyPanelBody}>
-              <div className={styles.safetyScoreRow}>
-                <span className={styles.safetyScoreLabel}>점수</span>
-                <span
-                  className={`${styles.safetyScoreValue} ${
-                    styles[`safetyGrade_${safetyGradeVariant(mapPointSafety.grade)}`]
-                  }`}
-                >
-                  {mapPointSafety.score}점
-                </span>
-              </div>
               <div className={styles.safetyGradeRow}>
-                <span className={styles.safetyGradeLabel}>등급</span>
+                <span className={styles.safetyGradeLabel}>이 지점 등급</span>
                 <span
                   className={`${styles.safetyGradeBadge} ${
                     styles[`safetyGrade_${safetyGradeVariant(mapPointSafety.grade)}`]
@@ -1846,23 +1852,29 @@ function App() {
                   {mapPointSafety.grade}
                 </span>
               </div>
-              <div className={styles.safetyDetailRow}>
-                <span>CCTV</span><span>{mapPointSafety.cctv_count}대</span>
-              </div>
-              <div className={styles.safetyDetailRow}>
-                <span>가로등</span><span>{mapPointSafety.light_count}개</span>
-              </div>
-              <div className={styles.safetyDetailRow}>
-                <span>편의점</span><span>{mapPointSafety.conv_count}개</span>
-              </div>
-              <div className={styles.safetyDetailRow}>
-                <span>24시간 점포</span><span>{mapPointSafety.open24_count}개</span>
-              </div>
-              <div className={styles.safetyDetailRow}>
-                <span>유흥업소</span><span>{mapPointSafety.ent_count}개</span>
-              </div>
-              <div className={styles.safetyDetailRow}>
-                <span>경찰서/지구대</span><span>{mapPointSafety.police_count}개</span>
+              <div className={styles.safetyChips}>
+                {([
+                  { label: 'CCTV', value: mapPointSafety.cctv_count, unit: '대', neg: false },
+                  { label: '가로등', value: mapPointSafety.light_count, unit: '개', neg: false },
+                  { label: '편의점', value: mapPointSafety.conv_count, unit: '개', neg: false },
+                  { label: '24시간 점포', value: mapPointSafety.open24_count, unit: '개', neg: false },
+                  { label: '경찰서·지구대', value: mapPointSafety.police_count, unit: '개', neg: false },
+                  { label: '유흥업소', value: mapPointSafety.ent_count, unit: '개', neg: true },
+                ] as { label: string; value: number; unit: string; neg: boolean }[]).map(({ label, value, unit, neg }) => {
+                  const present = value > 0;
+                  const chipCls = present
+                    ? (neg ? styles.safetyChipNeg : styles.safetyChipPos)
+                    : styles.safetyChipOff;
+                  const valCls = present
+                    ? (neg ? styles.safetyChipValNeg : styles.safetyChipValPos)
+                    : styles.safetyChipValOff;
+                  return (
+                    <div key={label} className={`${styles.safetyChip} ${chipCls}`}>
+                      <span className={styles.safetyChipLabel}>{label}</span>
+                      <span className={`${styles.safetyChipValue} ${valCls}`}>{value}{unit}</span>
+                    </div>
+                  );
+                })}
               </div>
               <div className={styles.safetyCoords}>
                 {mapPointSafety.lat.toFixed(5)}, {mapPointSafety.lng.toFixed(5)}

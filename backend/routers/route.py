@@ -50,6 +50,7 @@ class RouteResult(BaseModel):
     avg_score: float
     grade: str
     duration: int                 # 분 단위
+    distance_m: int               # 경로 총 거리 (미터)
 
 
 class RouteResponse(BaseModel):
@@ -254,6 +255,11 @@ def _build_route_result(
     route_grade = _score_to_grade(avg_score)
     points = [[lat, lng] for lat, lng in coords]
 
+    total_dist = sum(
+        _straight_distance_m(coords[i][0], coords[i][1], coords[i+1][0], coords[i+1][1])
+        for i in range(len(coords) - 1)
+    ) if len(coords) > 1 else 0.0
+
     return RouteResult(
         type=route_type,
         points=points,
@@ -261,6 +267,7 @@ def _build_route_result(
         avg_score=avg_score,
         grade=route_grade,
         duration=round(total_duration_sec / 60),
+        distance_m=round(total_dist),
     )
 
 
@@ -382,7 +389,7 @@ def _build_safe_route(
             1 for i in range(first_danger_idx, len(sampled))
             if scores_grades[i][1] != "안전"
         )
-        ray_length = max(200.0, consecutive * 50.0)
+        ray_length = consecutive * 50.0
 
         danger_pt = sampled[first_danger_idx]
         prev_pt = sampled[first_danger_idx - 1] if first_danger_idx > 0 else from_pt
