@@ -472,14 +472,32 @@ type AiSafetyPanelProps = {
 
 /** AI 경로 분석 UI — PC 지도 좌하단과 모바일 하단 시트에서 공통 사용 */
 function AiSafetyPanel({ aiDescription, aiDescriptionLoading, onRequest }: AiSafetyPanelProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(false);
+  }, [aiDescription]);
+
   return (
     <section className={styles.aiDescBox} aria-label="AI 안전 안내">
-      <div className={styles.aiDescLabel}>🤖 AI 안전 안내</div>
+      {aiDescription ? (
+        <button
+          type="button"
+          className={styles.aiDescLabelClickable}
+          onClick={() => setCollapsed((v) => !v)}
+          aria-expanded={!collapsed}
+        >
+          <span>🤖 AI 안전 안내</span>
+          <span className={styles.aiDescToggleArrow}>{collapsed ? '▼' : '▲'}</span>
+        </button>
+      ) : (
+        <div className={styles.aiDescLabel}>🤖 AI 안전 안내</div>
+      )}
       {aiDescriptionLoading ? (
         <div className={styles.aiDescLoading}>
           <span className={styles.geoSpinner} aria-hidden /> 경로 분석 중…
         </div>
-      ) : aiDescription ? (
+      ) : aiDescription && !collapsed ? (
         <div className={styles.aiDescContent}>
           {aiDescription.safe_points.length > 0 && (
             <div className={styles.aiDescSection}>
@@ -510,11 +528,11 @@ function AiSafetyPanel({ aiDescription, aiDescriptionLoading, onRequest }: AiSaf
             <p className={styles.aiDescSummaryText}>{aiDescription.ai_summary}</p>
           </div>
         </div>
-      ) : (
+      ) : !aiDescription && !aiDescriptionLoading ? (
         <button type="button" className={styles.aiDescBtn} onClick={onRequest}>
           AI 경로 분석하기
         </button>
-      )}
+      ) : null}
     </section>
   );
 }

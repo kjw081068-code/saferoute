@@ -128,7 +128,7 @@ def _score_for_coord(lat: float, lng: float) -> Tuple[float, str]:
         _daytime_activity_bonus()
         + _cctv_score_for_coord(lat, lng)
         + _streetlight_score_for_coord(lat, lng)
-        + _safelight_score_for_coord(lat, lng, radius_m=10.0)
+        + _safelight_score_for_coord(lat, lng, radius_m=18.0)
         + _combined_conv_open24_score_for_coord(lat, lng)
         + _police_score_for_coord(lat, lng)
         + _firestation_score_for_coord(lat, lng)
