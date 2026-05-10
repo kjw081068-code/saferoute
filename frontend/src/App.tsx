@@ -372,7 +372,7 @@ function formatKoreanTime(d: Date) {
 
 function isNight(d: Date) {
   const h = d.getHours();
-  return h >= 19 || h < 6;
+  return h >= 20 || h < 7;
 }
 
 function pickAddressFromGeocodeResult(r: Coord2AddressResult): string {
